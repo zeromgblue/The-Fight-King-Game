@@ -324,3 +324,6 @@ canvas, #hud, #touch, #side-btns, #overlay button, .pad, .round-btn { touch-acti
   .panel .opt, .panel .swatch, .panel .tab { padding-top: 4px; padding-bottom: 4px; font-size: 13px; }
   #prep-ok { padding: 6px; font-size: 15px; margin-top: 4px; }
 }
+
+/* phone landscape: hide the quest banner so it never covers the play area (the gold GPS line + arrow still guide) */
+@media (orientation: landscape) and (max-height: 480px) { #objective { display: none !important; } }
