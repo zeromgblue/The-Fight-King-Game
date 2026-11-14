@@ -365,3 +365,26 @@ canvas, #hud, #touch, #side-btns, #overlay button, .pad, .round-btn { touch-acti
   .panel:has(#m-resume) > h2, .panel:has(#m-resume) > .sub, .panel:has(#m-resume) > .stat-grid, .panel:has(#m-resume) > .unlock { grid-column: 1 / -1; }
   .unlock { font-size: 11px; padding: 3px 8px; margin: 2px 0; }
 }
+
+/* ===== smaller, centred frames (phones, landscape) ===== */
+@media (orientation: landscape) and (max-height: 480px) {
+  .scrim { display: grid; place-items: center; padding: 8px 5vw; }
+  .panel { width: min(520px, 90vw); max-height: min(92vh, 340px); margin: auto; }
+  .prep { width: min(660px, 92vw); max-height: 92vh; }
+  .opts { max-height: calc(92vh - 150px); }
+  .lb-menu { width: min(340px, 100%); justify-self: center; }
+  #lobby { padding-left: 4vw; padding-right: 4vw; }
+  .dlg, .panel:has(.dlg-head) { width: min(480px, 88vw); }
+}
+@media (orientation: landscape) and (max-height: 480px) {
+  .scrim { overflow: hidden; }
+  .prep { max-height: min(92vh, 340px); display: flex; flex-direction: column; overflow: hidden; }
+  .prep > .sub { display: none; }
+  .prep .tabs { flex-wrap: nowrap; overflow-x: auto; } .prep .tab { padding: 2px 6px; font-size: 11px; white-space: nowrap; }
+  .prep-body { flex: 1; min-height: 0; } .prep-body > div:last-child { min-height: 0; display: flex; flex-direction: column; }
+  .opts { max-height: none; flex: 1; min-height: 0; }
+  .prep-view canvas { width: 60px; height: 72px; }
+  #prep-ok { flex: none; margin-top: 4px; }
+  .panel { overflow-y: auto; }
+}
+@media (orientation: landscape) and (max-height: 480px) { .prep { width: min(600px, 88vw); max-height: min(90vh, 320px); } }
