@@ -1835,12 +1835,21 @@ function drawTitleBg() {
   ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
 }
 
+// ================================================================== landscape only (phones)
+const portraitMQ = matchMedia('(orientation: portrait) and (pointer: coarse)');
+function isPortraitTouch() { return portraitMQ.matches; }
+function tryLockLandscape() {
+  const o = screen.orientation as ScreenOrientation & { lock?: (t: string) => Promise<void> };
+  try { o?.lock?.('landscape')?.catch(() => {}); } catch { /* needs fullscreen/PWA; overlay is the fallback */ }
+}
+window.addEventListener('pointerdown', tryLockLandscape, { once: true });
+
 // ================================================================== main loop
 let last = performance.now();
 function frame(now: number) {
   let dt = Math.min(0.05, (now - last) / 1000); last = now; time += dt;
   if (scene === 'map' && map) {
-    if (!panelOpen()) {
+    if (!panelOpen() && !isPortraitTouch()) {
       if (freeze > 0) { freeze -= dt; dt = 0; }
       else if (slowmo > 0) { slowmo -= dt; dt *= 0.3; }
       if (dt > 0) updateWorld(dt);

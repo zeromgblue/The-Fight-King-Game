@@ -262,3 +262,10 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--ink); 
   .pad.skill { right: calc(150px + env(safe-area-inset-right)); bottom: calc(14px + env(safe-area-inset-bottom)); }
   .pad.talk { right: calc(160px + env(safe-area-inset-right)); bottom: calc(76px + env(safe-area-inset-bottom)); }
 }
+
+/* landscape only on touch devices */
+#rotate-hint { display: none; position: fixed; inset: 0; z-index: 9999; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px; text-align: center; color: #f4e8c8; background: #120e0b; font: 500 20px var(--th); }
+#rotate-hint svg { color: var(--gold); animation: rot 2s ease-in-out infinite; }
+#rotate-hint span { font: 400 14px var(--th); opacity: .7; }
+@keyframes rot { 0%, 20% { transform: rotate(0); } 60%, 100% { transform: rotate(-90deg); } }
+@media (orientation: portrait) and (pointer: coarse) { #rotate-hint { display: flex; } }
