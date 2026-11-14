@@ -399,3 +399,7 @@ canvas, #hud, #touch, #side-btns, #overlay button, .pad, .round-btn { touch-acti
   #banner b { font-size: 22px; text-shadow: 2px 2px 0 #8a4a14, 3px 3px 0 #000; }
   #banner span { font-size: 11px; margin-top: 2px; padding: 1px 8px; }
 }
+
+/* scrollable lists: children must allow vertical panning too (the global `* {touch-action:none}` blocks drags that start on a button) */
+.lb-stages, .lb-stages *, .opts, .opts *, .stage-list, .stage-list *, .panel, .panel *:not(.panel-x) { touch-action: pan-y; }
+.lb-menu { touch-action: pan-y; }
