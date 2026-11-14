@@ -389,3 +389,13 @@ canvas, #hud, #touch, #side-btns, #overlay button, .pad, .round-btn { touch-acti
 }
 @media (orientation: landscape) and (max-height: 480px) { .prep { width: min(600px, 88vw); max-height: min(90vh, 320px); } }
 @media (orientation: landscape) and (max-height: 480px) { .prep { width: min(540px, 84vw); max-height: min(88vh, 300px); } }
+
+/* level-up / boss banner: smaller so it never hides the play area */
+#banner { top: 14%; max-width: 70vw; }
+#banner b { font-size: clamp(22px, 5vw, 40px); text-shadow: 2px 2px 0 #8a4a14, 4px 4px 0 #000; letter-spacing: 1px; }
+#banner span { margin-top: 4px; font-size: 13px; padding: 2px 10px; }
+@media (orientation: landscape) and (max-height: 480px) {
+  #banner { top: 10%; max-width: 56vw; }
+  #banner b { font-size: 22px; text-shadow: 2px 2px 0 #8a4a14, 3px 3px 0 #000; }
+  #banner span { font-size: 11px; margin-top: 2px; padding: 1px 8px; }
+}
