@@ -1835,6 +1835,18 @@ function drawTitleBg() {
   ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
 }
 
+// ================================================================== in-app browsers are not supported
+const IN_APP = /Instagram|FBAN|FBAV|FB_IAB|Messenger|Line\/|TikTok|musical_ly|BytedanceWebview|Snapchat|Twitter|MicroMessenger|KAKAOTALK|Pinterest|LinkedInApp/i.test(navigator.userAgent);
+if (IN_APP) {
+  document.body.classList.add('inapp');
+  const url = location.href;
+  $('inapp-open').onclick = () => {
+    if (/Android/i.test(navigator.userAgent)) location.href = 'intent://' + url.replace(/^https?:\/\//, '') + '#Intent;scheme=https;package=com.android.chrome;end';
+    else { const w = window.open(url, '_blank'); if (!w) $('inapp-sub').textContent = 'เปิดอัตโนมัติไม่ได้ กรุณาทำตามขั้นตอนด้านล่าง'; }
+  };
+  $('inapp-copy').onclick = async () => { try { await navigator.clipboard.writeText(url); $('inapp-copy').textContent = 'คัดลอกแล้ว — นำไปวางใน Chrome/Safari'; } catch { prompt('คัดลอกลิงก์นี้', url); } };
+}
+
 // ================================================================== landscape only (phones)
 const portraitMQ = matchMedia('(orientation: portrait) and (pointer: coarse)');
 function isPortraitTouch() { return portraitMQ.matches; }
@@ -1855,6 +1867,7 @@ document.addEventListener('wheel', e => { if (e.ctrlKey) e.preventDefault(); }, 
 // ================================================================== main loop
 let last = performance.now();
 function frame(now: number) {
+  if (IN_APP) { requestAnimationFrame(frame); return; }
   let dt = Math.min(0.05, (now - last) / 1000); last = now; time += dt;
   if (scene === 'map' && map) {
     if (!panelOpen() && !isPortraitTouch()) {
