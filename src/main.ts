@@ -1332,7 +1332,7 @@ function updateWorld(dt: number) {
   if (flags.s1) { flags.s1 = false; castSkill(0); }
   if (flags.s2) { flags.s2 = false; castSkill(1); }
   if (flags.s3) { flags.s3 = false; castSkill(2); }
-  ['btn-s1', 'btn-s2', 'btn-s3'].forEach((id, i) => $(id).classList.toggle('cd', P.scd[i] > 0));
+  ['btn-s1', 'btn-s2', 'btn-s3'].forEach((id, i) => { const b = $(id), c = P.scd[i]; b.classList.toggle('cd', c > 0); const t = c > 0 ? c.toFixed(1) : ''; if (b.dataset.cd !== t) b.dataset.cd = t; });
 
   if (P.swingT > 0) {
     P.swingT -= dt;
