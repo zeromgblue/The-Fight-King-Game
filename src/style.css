@@ -388,3 +388,4 @@ canvas, #hud, #touch, #side-btns, #overlay button, .pad, .round-btn { touch-acti
   .panel { overflow-y: auto; }
 }
 @media (orientation: landscape) and (max-height: 480px) { .prep { width: min(600px, 88vw); max-height: min(90vh, 320px); } }
+@media (orientation: landscape) and (max-height: 480px) { .prep { width: min(540px, 84vw); max-height: min(88vh, 300px); } }
