@@ -1844,6 +1844,14 @@ function tryLockLandscape() {
 }
 window.addEventListener('pointerdown', tryLockLandscape, { once: true });
 
+// block page zoom (iOS ignores user-scalable=no)
+for (const ev of ['gesturestart', 'gesturechange', 'gestureend']) document.addEventListener(ev, e => e.preventDefault());
+document.addEventListener('dblclick', e => e.preventDefault(), { passive: false });
+let lastTouchEnd = 0;
+document.addEventListener('touchend', e => { const n = Date.now(); if (n - lastTouchEnd < 350) e.preventDefault(); lastTouchEnd = n; }, { passive: false });
+document.addEventListener('touchmove', e => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
+document.addEventListener('wheel', e => { if (e.ctrlKey) e.preventDefault(); }, { passive: false });
+
 // ================================================================== main loop
 let last = performance.now();
 function frame(now: number) {
