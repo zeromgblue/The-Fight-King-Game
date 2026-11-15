@@ -3,26 +3,37 @@ import { sfx, blip } from './audio';
 import { defaultLook, defaultGear, type Look, type Gear } from './data';
 
 export interface Save {
-  level: number; exp: number; gold: number;
+  name: string; level: number; exp: number; gold: number;
   cleared: number[]; quests: Record<string, boolean>; started: boolean;
   stats: { answered: number; correct: number };
   look: Look; gear: Gear; prepped: boolean;
 }
 
-const KEY = 'knws_quest_v1';
-export const freshSave = (): Save => ({ level: 1, exp: 0, gold: 0, cleared: [], quests: {}, started: false, stats: { answered: 0, correct: 0 }, look: defaultLook(), gear: defaultGear(), prepped: false });
-
+const LEGACY_KEY = 'knws_quest_v1';
+let owner = '';
+const key = () => owner ? LEGACY_KEY + '_' + owner : LEGACY_KEY;
+/** called after every local save so the cloud copy can follow */
+export const saveHooks: { onSave?: (s: Save) => void } = {};
+export const freshSave = (): Save => ({ name: '', level: 1, exp: 0, gold: 0, cleared: [], quests: {}, started: false, stats: { answered: 0, correct: 0 }, look: defaultLook(), gear: defaultGear(), prepped: false });
+export function mergeSave(o: Partial<Save> | null | undefined): Save {
+  const f = freshSave(); if (!o || typeof o !== 'object') return f;
+  return { ...f, ...o, look: { ...f.look, ...(o.look || {}) }, gear: { ...f.gear, ...(o.gear || {}) }, stats: { ...f.stats, ...(o.stats || {}) } } as Save;
+}
+export function setSaveOwner(uid: string) { owner = uid; }
 export function loadSave(): Save {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (raw) { const o = JSON.parse(raw); const f = freshSave(); return { ...f, ...o, look: { ...f.look, ...(o.look || {}) }, gear: { ...f.gear, ...(o.gear || {}) }, stats: { ...f.stats, ...(o.stats || {}) } }; }
-  } catch { /* ignore */ }
+  try { const raw = localStorage.getItem(key()); if (raw) return mergeSave(JSON.parse(raw)); } catch { /* ignore */ }
   return freshSave();
 }
-export function writeSave(s: Save) {
-  try { localStorage.setItem(KEY, JSON.stringify(s)); } catch { /* ignore */ }
+/** one-time adoption of progress saved before accounts existed */
+export function takeLegacySave(): Save | null {
+  try { const raw = localStorage.getItem(LEGACY_KEY); if (!raw) return null; const o = mergeSave(JSON.parse(raw)); return o.started ? o : null; } catch { return null; }
 }
-export function wipeSave() { try { localStorage.removeItem(KEY); } catch { /* ignore */ } }
+export function dropLegacySave() { try { localStorage.removeItem(LEGACY_KEY); } catch { /* ignore */ } }
+export function writeSave(s: Save) {
+  try { localStorage.setItem(key(), JSON.stringify(s)); } catch { /* ignore */ }
+  saveHooks.onSave?.(s);
+}
+export function wipeSave() { try { localStorage.removeItem(key()); } catch { /* ignore */ } }
 
 export const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 export const esc = (s: string) => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));

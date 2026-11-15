@@ -1,3 +1,4 @@
+import { fbConfigured, watchAuth, googleSignIn, logout, loadProfile, pushProfile, type User } from './firebase';
 import './style.css';
 import {
   STAGES, STORY_INTRO, WEAPONS, MAX_LEVEL, bestWeapon, bestArmor, ARMORS, HELMETS, SUBS, CHARMS, SKINS, HAIRS, PLUMES, TRIMS, CAPES, CAPE_NAMES, BOOTS, COLOR_NAMES,
@@ -11,7 +12,7 @@ import {
 import { sfx, setMusic, unlockAudio, isMuted, setMuted } from './audio';
 import {
   $, esc, toast, panel, panelOpen, closeAllPanels, closeTopPanel, dialog, confirmBox, askQuestion,
-  updateHud, loadSave, writeSave, freshSave, wipeSave, type Save,
+  updateHud, loadSave, writeSave, freshSave, wipeSave, mergeSave, setSaveOwner, saveHooks, takeLegacySave, dropLegacySave, type Save,
 } from './ui';
 
 // ================================================================== setup
@@ -840,13 +841,14 @@ function drawPreview(cv: HTMLCanvasElement, dirIdx: number) {
 
 type Row = { h: string } | { html: string; on: boolean; locked: boolean; cls: string; pick: () => void };
 
-function openPrep(done?: () => void) {
+function openPrep(done?: () => void, forceDone = false) {
   let tab = 'body', dirIdx = 0;
   const p = panel(
     `<h2>เตรียมตัวออกศึก</h2><div class="sub">แต่งกายและเลือกอุปกรณ์ของอัศวิน — ไอเท็มใหม่ปลดล็อกตามเลเวล (แตะตัวละครเพื่อหมุนดู)</div>` +
     `<div class="prep-body"><div><div class="prep-view"><canvas id="pv" width="40" height="48"></canvas></div><div class="prep-stats" id="pst"></div></div>` +
     `<div><div class="tabs" id="tabs"></div><div class="opts" id="opts"></div></div></div><button class="btn gold" id="prep-ok">พร้อมออกเดินทาง</button>`);
   p.el.classList.add('prep');
+  if (forceDone) p.onX = () => (p.el.querySelector('#prep-ok') as HTMLElement).click();
   const pv = p.el.querySelector('#pv') as HTMLCanvasElement, tabsEl = p.el.querySelector('#tabs') as HTMLElement, optsEl = p.el.querySelector('#opts') as HTMLElement, pst = p.el.querySelector('#pst') as HTMLElement;
   const TABS: [string, string][] = [['body', 'ร่างกาย'], ['head', 'ศีรษะ'], ['armor', 'เกราะ'], ['cape', 'ผ้าคลุม'], ['boots', 'รองเท้า'], ['weapon', 'ดาบ'], ['sub', 'อาวุธเสริม'], ['charm', 'เครื่องราง']];
   const sw = (c: string | null) => `<span class="sw" style="background:${c ?? '#cdbb86'}"></span>`;
@@ -1036,7 +1038,7 @@ function openMenu() {
   const nextW = WEAPONS.find(x => x.minLevel > save.level);
   const acc = save.stats.answered ? Math.round(save.stats.correct / save.stats.answered * 100) : 0;
   const p = panel(
-    `<h2>อัศวินผู้กล้า</h2><div class="sub">เลเวล ${save.level} • EXP ${save.exp}/${need()}</div>` +
+    `<h2>${esc(save.name || 'อัศวินผู้กล้า')}</h2><div class="sub">เลเวล ${save.level} • EXP ${save.exp}/${need()}</div>` +
     `<div class="stat-grid"><span>HP <b>${Math.ceil(hp)}/${s.maxHp}</b></span><span>ทอง <b>${save.gold}</b></span><span>โจมตี <b>${s.atk}</b></span><span>ป้องกัน <b>${s.def}</b></span>` +
     `<span>ดาบ <b>${esc(w.name)}</b></span><span>เกราะ <b>${esc(a.name)}</b></span><span>ตอบถูก <b>${save.stats.correct}/${save.stats.answered}</b></span><span>แม่นยำ <b>${acc}%</b></span></div>` +
     (nextW ? `<div class="unlock">ดาบประจำตัวถัดไป: ${esc(nextW.name)} ที่เลเวล ${nextW.minLevel}</div>` : '') +
@@ -1092,12 +1094,12 @@ function showTitle() {
     `<div class="lb-logo"><div class="lb-title">THE FIGHT<br>KING</div><div class="lb-sub">ตำนานอัศวินผู้พิทักษ์ปัญญา</div><div class="lb-tag">ผจญภัย 10 ดินแดน • ฟาร์มเลเวล • เรียนรู้ไปพร้อมกัน</div></div>` +
     `<div class="lb-menu">` +
     (has
-      ? `<div class="lb-card"><div class="lb-lv">LV<b>${save.level}</b></div><div class="lb-info"><b>อัศวินผู้กล้า</b><br>ผ่านแล้ว <b>${save.cleared.length}/10</b> ด่าน • ทอง <b>${save.gold}</b><br>${esc(gw().name)} • ${esc(ga().name)}</div></div>` +
+      ? `<div class="lb-card"><div class="lb-lv">LV<b>${save.level}</b></div><div class="lb-info"><b>${esc(save.name || 'อัศวินผู้กล้า')}</b><br>ผ่านแล้ว <b>${save.cleared.length}/10</b> ด่าน • ทอง <b>${save.gold}</b><br>${esc(gw().name)} • ${esc(ga().name)}</div></div>` +
         `<div class="lb-modes"><button class="lb-mode on" id="lbm-story">เนื้อเรื่อง</button><button class="lb-mode soon" id="lbm-cave">ถ้ำ/เหมือง<em>เร็ว ๆ นี้</em></button><button class="lb-mode soon" id="lbm-free">อิสระ<em>เร็ว ๆ นี้</em></button></div>` +
         `<div class="lb-stages" id="lb-stages">${stageRows}</div>`
       : `<button class="lb-btn primary" id="lb-start"><span>เริ่มการผจญภัย</span><small>รับพระราชโองการและออกเดินทาง</small></button>`) +
     `<div class="lb-actions"><button class="lb-act" id="lb-prep"><b>แต่งตัว</b><small>ชุด/อาวุธ/เครื่องราง</small></button><button class="lb-act soon" id="lb-party"><b>ชวนเพื่อน</b><small>ออนไลน์ เร็ว ๆ นี้</small></button><button class="lb-act" id="lb-how"><b>วิธีเล่น</b><small>ปุ่มและเคล็ดลับ</small></button></div>` +
-    `<div class="lb-foot"><button class="lb-mini" id="lb-mute">${isMuted() ? 'เสียง: ปิด' : 'เสียง: เปิด'}</button>${has ? '<button class="lb-mini" id="lb-reset">เริ่มเกมใหม่</button>' : ''}</div></div>` +
+    `<div class="lb-foot"><button class="lb-mini" id="lb-mute">${isMuted() ? 'เสียง: ปิด' : 'เสียง: เปิด'}</button><button class="lb-mini" id="lb-logout">ออกจากระบบ</button>${has ? '<button class="lb-mini" id="lb-reset">เริ่มเกมใหม่</button>' : ''}</div></div>` +
     `<div class="lb-tip" id="lb-tip">${TIPS[0]}</div><div class="lb-ver">v0.5 • บันทึกอัตโนมัติ</div>`;
   lobby.classList.remove('hidden');
   let ti = 0; clearInterval(tipTimer);
@@ -1105,12 +1107,13 @@ function showTitle() {
 
   const el = (id: string) => lobby.querySelector('#' + id) as HTMLElement | null;
   const startNew = async () => {
-    save = freshSave(); save.started = true; writeSave(save); hp = stats().maxHp; sp = 0;
+    const keep = { name: save.name, look: save.look }; save = freshSave(); save.name = keep.name; save.look = keep.look; save.started = true; writeSave(save); hp = stats().maxHp; sp = 0;
     hideLobby();
     await dialog('พระราชโองการ', [STORY_INTRO], 'รับบัญชา');
-    openPrep(() => showTitle());
+    showTitle();
   };
   const st0 = el('lb-start'); if (st0) st0.onclick = () => { unlockAudio(); sfx('click'); void startNew(); };
+  const lo = el('lb-logout'); if (lo) lo.onclick = async () => { unlockAudio(); sfx('click'); if (await confirmBox('ออกจากระบบ?', 'ความคืบหน้าถูกบันทึกไว้กับบัญชี Google ของคุณแล้ว', 'ออกจากระบบ', 'ยกเลิก')) { flushCloud(); await logout(); } };
   const rs = el('lb-reset'); if (rs) rs.onclick = async () => { unlockAudio(); sfx('click'); if (await confirmBox('เริ่มใหม่?', 'ความคืบหน้าเดิมจะหายไป', 'เริ่มใหม่', 'ยกเลิก')) { wipeSave(); await startNew(); } };
   lobby.querySelectorAll<HTMLButtonElement>('.lb-stage').forEach(b => {
     b.onclick = () => {
@@ -1881,6 +1884,75 @@ function frame(now: number) {
   requestAnimationFrame(frame);
 }
 
-showTitle();
+// ================================================================== account (Google sign-in only) + cloud save
+let uid = '', syncT = 0;
+function flushCloud() {
+  clearTimeout(syncT);
+  if (!uid || !save.name) return;
+  void pushProfile(uid, { name: save.name, save }).catch(() => { /* retried on next save */ });
+}
+saveHooks.onSave = () => { if (!uid) return; clearTimeout(syncT); syncT = window.setTimeout(flushCloud, 1500); };
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushCloud(); });
+addEventListener('pagehide', flushCloud);
+
+function hideAllForLogin() {
+  closeAllPanels(); scene = 'title'; inStage = false; setMusic('off');
+  for (const id of ['hud', 'touch', 'bossbar', 'side-btns', 'lobby', 'objective']) $(id).classList.add('hidden');
+  mmEl.classList.add('hidden');
+}
+function showLogin(msg = '') {
+  hideAllForLogin();
+  const el = $('login');
+  el.innerHTML = `<div class="lg-box"><div class="lb-title lg-title">THE FIGHT<br>KING</div><div class="lg-sub">ล็อกอินเพื่อบันทึกความคืบหน้าและเล่นต่อจากทุกอุปกรณ์</div>` +
+    `<button class="lg-google" id="lg-go"><svg viewBox="0 0 48 48" width="22" height="22"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.9 6.1C12.4 13.6 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.6 5.9c4.4-4.1 7-10.1 7-17.6z"/><path fill="#FBBC05" d="M10.5 28.7c-.5-1.5-.8-3-.8-4.7s.3-3.2.8-4.7l-7.9-6.1C.9 16.4 0 20.1 0 24s.9 7.6 2.6 10.8l7.9-6.1z"/><path fill="#34A853" d="M24 48c6.3 0 11.8-2.1 15.7-5.7l-7.6-5.9c-2.1 1.4-4.8 2.3-8.1 2.3-6.3 0-11.6-4.1-13.5-9.8l-7.9 6.1C6.5 42.6 14.6 48 24 48z"/></svg><span>ล็อกอินด้วย Google</span></button>` +
+    `<div class="lg-msg" id="lg-msg">${esc(msg)}</div></div>`;
+  el.classList.remove('hidden');
+  const go = $('lg-go') as HTMLButtonElement;
+  if (!fbConfigured) { $('lg-msg').textContent = 'ยังไม่ได้ตั้งค่า Firebase (ดู .env.example)'; go.disabled = true; return; }
+  go.onclick = async () => {
+    unlockAudio(); sfx('click'); go.disabled = true; $('lg-msg').textContent = 'กำลังเปิดหน้าล็อกอิน Google...';
+    try { await googleSignIn(); }
+    catch (e) {
+      const c = (e as { code?: string }).code ?? '';
+      $('lg-msg').textContent = c === 'auth/popup-closed-by-user' || c === 'auth/cancelled-popup-request' ? 'ยกเลิกการล็อกอิน' : 'ล็อกอินไม่สำเร็จ ลองใหม่อีกครั้ง';
+      go.disabled = false;
+    }
+  };
+}
+function showCreate() {
+  hideAllForLogin(); $('login').classList.add('hidden');
+  const p = panel(`<h2>ตั้งชื่ออัศวิน</h2><div class="sub">ยินดีต้อนรับ! ตั้งชื่อตัวละครของคุณ แล้วไปแต่งตัวต่อ</div>` +
+    `<input id="nm" class="nm-in" maxlength="14" placeholder="ชื่อตัวละคร (2-14 ตัวอักษร)" autocomplete="off" /><div class="nm-err" id="nm-err"></div>` +
+    `<button class="btn gold" id="nm-ok">ต่อไป: แต่งตัวละคร</button><button class="btn alt" id="nm-out">ออกจากระบบ</button>`);
+  p.onX = () => {};
+  const inp = p.el.querySelector('#nm') as HTMLInputElement, err = p.el.querySelector('#nm-err') as HTMLElement;
+  inp.value = save.name; setTimeout(() => inp.focus(), 50);
+  const ok = () => {
+    const name = inp.value.replace(/\s+/g, ' ').trim();
+    if (name.length < 2) { err.textContent = 'ชื่อต้องมีอย่างน้อย 2 ตัวอักษร'; sfx('wrong'); return; }
+    sfx('click'); save.name = name; writeSave(save); flushCloud(); p.close();
+    openPrep(() => { save.prepped = true; writeSave(save); flushCloud(); showTitle(); }, true);
+  };
+  (p.el.querySelector('#nm-ok') as HTMLElement).onclick = ok;
+  inp.addEventListener('keydown', e => { if (e.key === 'Enter') ok(); });
+  (p.el.querySelector('#nm-out') as HTMLElement).onclick = async () => { sfx('click'); p.close(); await logout(); };
+}
+let authSeq = 0;
+async function onUser(u: User | null) {
+  const seq = ++authSeq;
+  if (!u) { uid = ''; setSaveOwner(''); showLogin(); return; }
+  hideAllForLogin(); const el = $('login'); el.innerHTML = '<div class="lg-box"><div class="lg-sub">กำลังโหลดข้อมูลผู้เล่น...</div></div>'; el.classList.remove('hidden');
+  let prof: Awaited<ReturnType<typeof loadProfile>>;
+  try { prof = await loadProfile(u.uid); }
+  catch { if (seq === authSeq) { uid = ''; setSaveOwner(''); showLogin('เชื่อมต่อฐานข้อมูลไม่ได้ ลองใหม่อีกครั้ง'); } return; }
+  if (seq !== authSeq) return;
+  uid = u.uid; setSaveOwner(uid);
+  if (prof?.save) { save = mergeSave(prof.save as Partial<Save>); if (prof.name) save.name = prof.name; }
+  else { const legacy = takeLegacySave(); if (legacy) { save = legacy; dropLegacySave(); } else save = loadSave(); }
+  hp = stats().maxHp; sp = 0;
+  $('login').classList.add('hidden');
+  if (!save.name) showCreate(); else { writeSave(save); showTitle(); }
+}
+watchAuth(u => { void onUser(u); });
 requestAnimationFrame(frame);
 
