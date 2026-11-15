@@ -428,3 +428,73 @@ body.inapp #rotate-hint { display: none !important; }
   .nm-in { padding: 6px 10px; font-size: 15px; margin-top: 2px; } .nm-err { min-height: 1em; font-size: 11px; }
   .lb-foot { flex-wrap: wrap; }
 }
+
+/* ===== centre HUD: level / hp / exp + item slots ===== */
+#center-hud { position: absolute; left: 50%; bottom: calc(10px + env(safe-area-inset-bottom)); transform: translateX(-50%); display: grid; gap: 6px; justify-items: center; z-index: 6; }
+#center-hud .hero-card { position: static; }
+#hotbar { display: flex; gap: 6px; pointer-events: auto; }
+.slot { position: relative; width: 46px; height: 46px; padding: 0; display: grid; place-items: center; cursor: pointer; background: linear-gradient(#3a2c20, #1f1610); border: 3px solid #6a5238; border-radius: 8px; box-shadow: 0 0 0 2px #000, 0 4px 0 rgba(0,0,0,.5); touch-action: none; }
+.slot:active { transform: translateY(2px); }
+.slot.on { border-color: var(--gold); background: linear-gradient(#5a4630, #2f2218); box-shadow: 0 0 0 2px #000, 0 0 12px #ffd84a88; }
+.slot.lock { opacity: .45; filter: grayscale(.6); }
+.slot small { position: absolute; left: 3px; top: 1px; font: 700 10px var(--ui); color: #fff; text-shadow: 0 1px 0 #000; }
+.slot .swd { width: 6px; height: 28px; background: linear-gradient(var(--g), var(--c)); border: 1px solid #000; transform: rotate(40deg); box-shadow: 0 0 6px var(--g); }
+.slot .swd::before { content: ''; position: absolute; left: 50%; bottom: 7px; width: 14px; height: 4px; margin-left: -7px; background: #7a5a2a; border: 1px solid #000; transform: rotate(0deg); }
+.gold-pill { top: calc(10px + env(safe-area-inset-top)); }
+#minimap { top: calc(52px + env(safe-area-inset-top)); }
+#btn-map { top: calc(56px + var(--mw, 120px) * 0.75 + 20px + env(safe-area-inset-top)); }
+#btn-gps { top: calc(56px + var(--mw, 120px) * 0.75 + 20px + env(safe-area-inset-top)); }
+#touch.sea .sk, #touch.sea .big, #touch.sea .skill { display: none; }
+/* sea chart */
+.sc-list { display: grid; gap: 6px; max-height: 30vh; overflow-y: auto; margin-top: 8px; touch-action: pan-y; }
+.sc-row { display: flex; gap: 8px; align-items: center; text-align: left; padding: 6px 10px; background: #f6ecc6; color: var(--ink2); border: 3px solid var(--ink); font: 500 14px var(--th); cursor: pointer; box-shadow: 0 3px 0 var(--ink); }
+.sc-row b { width: 24px; text-align: center; color: var(--red); } .sc-row span { flex: 1; } .sc-row i { font-style: normal; font-size: 12px; opacity: .8; }
+.sc-row.lock { opacity: .6; } .sc-row.on { outline: 3px solid var(--red); }
+@media (orientation: landscape) and (max-height: 480px) {
+  #center-hud { bottom: calc(6px + env(safe-area-inset-bottom)); gap: 4px; }
+  #center-hud .hero-card { position: static; }
+  #hotbar { gap: 4px; }
+  .slot { width: 34px; height: 34px; border-width: 2px; border-radius: 6px; }
+  .slot small { font-size: 8px; } .slot .swd { height: 20px; width: 5px; } .slot .swd::before { bottom: 4px; width: 11px; margin-left: -6px; }
+  .gold-pill { top: calc(6px + env(safe-area-inset-top)); left: calc(8px + env(safe-area-inset-left)); }
+  #minimap { top: calc(34px + env(safe-area-inset-top)); }
+  #btn-map, #btn-gps { top: calc(34px + 62px + 10px + env(safe-area-inset-top)); }
+  .sc-list { max-height: calc(100vh - 230px); }
+}
+
+/* crafting panel */
+.rc { display: grid; gap: 6px; padding: 8px 10px; margin: 8px 0; background: #f6ecc6; border: 3px solid var(--ink); }
+.rc-h { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; } .rc-h b { font: 500 17px var(--th); color: var(--red); } .rc-h small { font: 400 12px var(--th); opacity: .75; }
+.rc-n { display: flex; flex-wrap: wrap; gap: 6px; } .rc-n span { padding: 2px 8px; font: 500 13px var(--th); border: 2px solid var(--ink); background: #fff8dc; } .rc-n .ok { background: #c8ecb0; } .rc-n .no { background: #f4b8a8; }
+@media (orientation: landscape) and (max-height: 480px) { .rc { padding: 4px 8px; margin: 4px 0; gap: 3px; } .rc-h b { font-size: 14px; } .rc-n span { font-size: 11px; padding: 1px 6px; } }
+
+/* quest pill */
+#quest-pill { font: 500 12px var(--th); color: #fff; background: #1a3a5add; border: 2px solid #6ac0e8; padding: 3px 12px; border-radius: 14px; max-width: 100%; text-align: center; text-shadow: 0 1px 0 #000; }
+#quest-pill.done { border-color: #ffd84a; background: #4a3a10dd; animation: pulse .9s ease-in-out infinite; }
+@media (orientation: landscape) and (max-height: 480px) { #quest-pill { font-size: 10px; padding: 1px 9px; border-width: 1px; } }
+
+#quest-pill.none { border-color: #ff9a8a; background: #4a1a1add; }
+
+/* separate bag and dress-up buttons */
+#btn-dress { right: calc(12px + env(safe-area-inset-right)); top: calc(176px + env(safe-area-inset-top)); }
+#btn-menu { top: calc(266px + env(safe-area-inset-top)); }
+@media (orientation: landscape) and (max-height: 480px) {
+  #btn-dress { right: calc(8px + env(safe-area-inset-right)); top: calc(92px + env(safe-area-inset-top)); }
+  #btn-menu { top: calc(136px + env(safe-area-inset-top)); }
+}
+
+/* chat */
+#btn-chat { right: calc(112px + env(safe-area-inset-right)); top: calc(8px + env(safe-area-inset-top)); }
+#chatlog { position: fixed; left: calc(10px + env(safe-area-inset-left)); bottom: calc(150px + env(safe-area-inset-bottom)); width: min(300px, 38vw); z-index: 6; pointer-events: none; display: grid; gap: 2px; }
+#chatlog.hidden { display: none; }
+#chatlog .cl { font: 400 13px/1.3 var(--th); color: #fff; background: rgba(0,0,0,.45); padding: 2px 8px; border-radius: 8px; text-shadow: 0 1px 0 #000; transition: opacity 1.5s; word-break: break-word; }
+#chatlog .cl b { color: #ffd84a; font-weight: 500; } #chatlog .cl.old { opacity: 0; }
+#chatbar { position: fixed; left: 50%; top: calc(74px + env(safe-area-inset-top)); transform: translateX(-50%); width: min(440px, 88vw); z-index: 20; display: flex; gap: 6px; padding: 6px; background: #1a1410ee; border: 3px solid var(--gold); border-radius: 12px; touch-action: manipulation; }
+#chatbar.hidden { display: none; }
+#chat-in { flex: 1; min-width: 0; padding: 8px 10px; font: 400 15px var(--th); color: #2a1f17; background: #fff8dc; border: 2px solid #000; border-radius: 8px; user-select: text; -webkit-user-select: text; touch-action: manipulation; }
+#chat-send { padding: 0 18px; font: 500 15px var(--th); color: #2a1f17; background: var(--gold); border: 2px solid #000; border-radius: 8px; cursor: pointer; }
+@media (orientation: landscape) and (max-height: 480px) {
+  #btn-chat { right: calc(84px + env(safe-area-inset-right)); top: calc(6px + env(safe-area-inset-top)); }
+  #chatlog { bottom: calc(126px + env(safe-area-inset-bottom)); width: min(240px, 34vw); } #chatlog .cl { font-size: 11px; padding: 1px 6px; }
+  #chatbar { top: calc(52px + env(safe-area-inset-top)); padding: 4px; } #chat-in { padding: 5px 8px; font-size: 13px; } #chat-send { padding: 0 12px; font-size: 13px; }
+}

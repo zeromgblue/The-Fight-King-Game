@@ -2,11 +2,13 @@ import { SUBJECT_NAME, type Question } from './questions';
 import { sfx, blip } from './audio';
 import { defaultLook, defaultGear, type Look, type Gear } from './data';
 
+export interface ActiveQuest { kind: 'kill' | 'elite' | 'boss'; need: number; have: number; mul: number; text: string; }
 export interface Save {
   name: string; level: number; exp: number; gold: number;
   cleared: number[]; quests: Record<string, boolean>; started: boolean;
   stats: { answered: number; correct: number };
   look: Look; gear: Gear; prepped: boolean;
+  quest: ActiveQuest | null; questDone: number; inv: Record<string, number>; loc: { kind: 'island' | 'sea'; id: number }; sea: { x: number; y: number; a: number }; nav: number;
 }
 
 const LEGACY_KEY = 'knws_quest_v1';
@@ -14,10 +16,10 @@ let owner = '';
 const key = () => owner ? LEGACY_KEY + '_' + owner : LEGACY_KEY;
 /** called after every local save so the cloud copy can follow */
 export const saveHooks: { onSave?: (s: Save) => void } = {};
-export const freshSave = (): Save => ({ name: '', level: 1, exp: 0, gold: 0, cleared: [], quests: {}, started: false, stats: { answered: 0, correct: 0 }, look: defaultLook(), gear: defaultGear(), prepped: false });
+export const freshSave = (): Save => ({ name: '', level: 1, exp: 0, gold: 0, cleared: [], quests: {}, started: false, stats: { answered: 0, correct: 0 }, look: defaultLook(), gear: defaultGear(), prepped: false, quest: null, questDone: 0, inv: {}, loc: { kind: 'island', id: 1 }, sea: { x: 0, y: 0, a: 0 }, nav: 0 });
 export function mergeSave(o: Partial<Save> | null | undefined): Save {
   const f = freshSave(); if (!o || typeof o !== 'object') return f;
-  return { ...f, ...o, look: { ...f.look, ...(o.look || {}) }, gear: { ...f.gear, ...(o.gear || {}) }, stats: { ...f.stats, ...(o.stats || {}) } } as Save;
+  return { ...f, ...o, look: { ...f.look, ...(o.look || {}) }, gear: { ...f.gear, ...(o.gear || {}) }, inv: { ...f.inv, ...(o.inv || {}) }, loc: { ...f.loc, ...(o.loc || {}) }, sea: { ...f.sea, ...(o.sea || {}) }, stats: { ...f.stats, ...(o.stats || {}) } } as Save;
 }
 export function setSaveOwner(uid: string) { owner = uid; }
 export function loadSave(): Save {

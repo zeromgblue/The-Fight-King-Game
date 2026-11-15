@@ -4,35 +4,41 @@ export type MonsterType = 'blob' | 'skull' | 'beast';
 export type ObsKind = 'tree' | 'rock' | 'pillar' | 'cactus' | 'wall' | 'crystal';
 
 export interface MonsterDef { name: string; type: MonsterType; c1: string; c2: string; }
-export interface NpcDef { name: string; subject: Subject; robe: string; hat: string; lines: string[]; }
+export interface NpcDef { name: string; subject: Subject; robe: string; hat: string; lines: string[]; quiz?: boolean; craft?: boolean; quest?: boolean; harbor?: boolean; outpost?: boolean; role?: string; }
 export interface StageDef {
   id: number; name: string; sub: string; rec: number;
   theme: { g1: string; g2: string; path: string; obs: ObsKind; oc: string; root: number };
   enemies: MonsterDef[]; boss: MonsterDef;
   intro: string; bossIntro: string; clear: string;
-  npcs: NpcDef[];
+  npcs: NpcDef[]; town?: boolean; hub?: boolean;
+  drops?: { mob: [string, number]; boss: [string, number, number] };
 }
 
 export const STORY_INTRO =
   'หมอกแห่งการลืมเลือนแผ่ปกคลุมแผ่นดิน ความรู้และประวัติศาสตร์ของอาณาจักรกำลังเลือนหายไปทีละหน้า ' +
-  'พระราชาทรงมอบพระราชโองการให้เจ้า อัศวินผู้กล้า ออกเดินทางผ่านดินแดนโบราณทั้งสิบ ' +
-  'ตามล่าผู้พิทักษ์หมอกให้ครบทุกตน ขอให้ปัญญาและคมดาบนำทางเจ้า';
+  'เจ้าลืมตาขึ้นบนเกาะสุโขทัย เกาะแรกของทะเลโลก 1 ที่นี่คือบ้านและจุดเริ่มต้นของผู้กล้า ' +
+  'ฟาร์มเลเวลจากมอนสเตอร์ ล้มบอสเพื่อเก็บวัตถุดิบไปตีดาบ แล้วล่องเรือไปพิชิตเกาะต่อไป ขอให้โชคดี';
 
 export const STAGES: StageDef[] = [
   {
-    id: 1, name: 'ทุ่งนาสุโขทัย', sub: 'ราชธานีแห่งแรก', rec: 1,
+    id: 1, name: 'เกาะสุโขทัย', sub: 'เกาะแรก • จุดเริ่มต้นของผู้กล้า', rec: 1, hub: true, drops: { mob: ['goo', 0.4], boss: ['straw', 1, 2] },
     theme: { g1: '#5f9e4a', g2: '#528c3f', path: '#c9b27a', obs: 'tree', oc: '#2f6b32', root: 57 },
     enemies: [
       { name: 'เมือกทุ่งนา', type: 'blob', c1: '#6bbf59', c2: '#3f8a3a' },
       { name: 'หนูนาจอมโหด', type: 'beast', c1: '#a67c52', c2: '#6b4a2a' },
     ],
     boss: { name: 'ราชาเมือกฟาง', type: 'blob', c1: '#e0c04a', c2: '#a8862a' },
-    intro: 'ทุ่งนาแห่งสุโขทัย ดินแดนที่ศิลาจารึกถูกจารึกไว้ จงฝ่าหมอกเข้าไปและเอาชนะผู้พิทักษ์แห่งแรก',
+    intro: 'เกาะสุโขทัย บ้านและจุดเริ่มต้นของผู้กล้า ลานกลางเมืองมีร้านค้าและช่างตีดาบ ส่วนรอบนอกคือทุ่งฟาร์มมอนสเตอร์ และบอสอยู่ที่ลานริมเกาะ',
     bossIntro: 'ราชาเมือกฟางลุกขึ้นกลางทุ่ง "ผู้ใดล้ำเข้ามา เจ้าจะต้องลืมทุกสิ่ง!"',
     clear: 'ราชาเมือกฟางสลายไป หมอกบางส่วนจางลง เส้นทางสู่ป่าล้านนาเปิดออกแล้ว',
     npcs: [
-      { name: 'ปราชญ์ผู้เฒ่า', subject: 'history', robe: '#b8472f', hat: '#e0c04a', lines: ['ข้าเฝ้าศิลาจารึกมาทั้งชีวิต', 'ตอบปัญหาของข้าให้ได้ แล้วจะมีรางวัล'] },
-      { name: 'พ่อค้าตลาดเช้า', subject: 'math', robe: '#3f7a8a', hat: '#d9965b', lines: ['มาช่วยคิดเลขให้ข้าหน่อยเถิด', 'ทอนเงินผิดทีไรลูกค้าบ่นทุกที'] },
+      { name: 'ช่างตีดาบ', role: 'ร้านช่างตีดาบ • คราฟอาวุธ', subject: 'math', robe: '#8a3a2a', hat: '#c9c2b0', craft: true, lines: ['ข้าตีดาบให้ผู้กล้ามาหลายรุ่นแล้ว', 'เอาวัตถุดิบจากมอนสเตอร์และบอสมาให้ข้า แล้วข้าจะตีดาบให้เจ้า'] },
+      { name: 'ปราชญ์ผู้เฒ่า', role: 'เล่าเรื่องเกาะ', subject: 'history', robe: '#b8472f', hat: '#e0c04a', lines: ['ยินดีต้อนรับสู่เกาะสุโขทัย เกาะแรกของโลกใบนี้', 'ล่ามอนสเตอร์เพื่อฟาร์มเลเวล แล้วท้าทายราชาเมือกฟางที่ลานบอสริมเกาะ', 'เมื่อแกร่งพอ ก็ลงเรือไปยังเกาะอื่นได้ เกาะที่เลเวลสูงอันตรายกว่ามาก'] },
+      { name: 'พ่อค้าผลปีศาจ', role: 'ร้านผลปีศาจ (เร็ว ๆ นี้)', subject: 'science', robe: '#6a3a9a', hat: '#ffd84a', lines: ['ผลปีศาจกินแล้วได้พลังเฉพาะตัว', 'ข้ายังรอสินค้าจากต่างแดน เร็ว ๆ นี้จะเปิดร้านนะ'] },
+      { name: 'ครูฝึกพลัง', role: 'ฝึกพลัง/สเตตัส (เร็ว ๆ นี้)', subject: 'science', robe: '#3a7a4a', hat: '#d9c27a', lines: ['อยากแข็งแกร่งต้องอัปสเตตัส ทั้งวิ่ง ดาบ และหมัด', 'ระบบฝึกพลังกำลังจะเปิด เร็ว ๆ นี้'] },
+      { name: 'ผู้ดูแลท่าเรือ', role: 'ท่าเรือ • เรียกเรือ', subject: 'history', robe: '#1f5a7a', hat: '#e8e0c8', harbor: true, lines: ['ยินดีต้อนรับสู่ท่าเรือเกาะสุโขทัย', 'ผู้กล้าทุกคนมีเรือเป็นของตัวเอง เรียกเข้าท่าได้ทุกเมื่อ แล้วออกทะเลไปยังเกาะอื่นได้เลย'] },
+      { name: 'ผู้ดูแลภารกิจ', subject: 'history', robe: '#2a6aa8', hat: '#ffd84a', quest: true, lines: ['ยินดีต้อนรับ ผู้กล้า! ข้าดูแลกระดานภารกิจของเกาะนี้', 'รับภารกิจแล้วออกไปปราบมอนสเตอร์ ทำสำเร็จจะได้ EXP และทองก้อนโต', 'อยากอัปเลเวลต้องทำภารกิจต่อเนื่อง กลับมารับใหม่ได้เสมอ'] },
+      { name: 'ผู้ดูแลภารกิจสนามฟาร์ม', role: 'รับภารกิจ (สนามฟาร์ม)', subject: 'history', robe: '#2a8a6a', hat: '#ffd84a', quest: true, outpost: true, lines: ['ข้าประจำจุดรับภารกิจภาคสนาม จะได้ไม่ต้องเดินกลับไปที่ลานเมือง', 'รับภารกิจจากข้าแล้วลุยมอนสเตอร์รอบนี้ได้เลย ทำสำเร็จรางวัลจ่ายให้ทันที'] },
     ],
   },
   {
@@ -181,7 +187,7 @@ export const STAGES: StageDef[] = [
   },
 ];
 
-export interface Weapon { name: string; minLevel: number; atk: number; color: string; glow: string; }
+export interface Weapon { name: string; minLevel: number; atk: number; color: string; glow: string; craft?: boolean; }
 export interface Armor { name: string; minLevel: number; def: number; }
 
 export const WEAPONS: Weapon[] = [
@@ -203,7 +209,7 @@ export const ARMORS: Armor[] = [
 
 export function bestWeapon(level: number): Weapon {
   let w = WEAPONS[0];
-  for (const x of WEAPONS) if (level >= x.minLevel) w = x;
+  for (const x of WEAPONS) if (!x.craft && level >= x.minLevel) w = x;
   return w;
 }
 export function bestArmor(level: number): Armor {
@@ -212,8 +218,8 @@ export function bestArmor(level: number): Armor {
   return a;
 }
 
-export const MAX_LEVEL = 30;
-export const expForLevel = (lv: number) => 40 + lv * 35;
+export const MAX_LEVEL = 1000; // world 1 cap
+export const expForLevel = (lv: number) => Math.round(40 + lv * 35 + lv * lv * 0.12); // tune freely
 export const maxHpFor = (lv: number) => 60 + lv * 14;
 export const atkFor = (lv: number) => 9 + lv * 3;
 export const defFor = (lv: number) => Math.floor(lv * 0.8);
@@ -258,3 +264,115 @@ export const CHARMS: Opt[] = [
 
 export const defaultLook = (): Look => ({ skin: 0, hair: 0, helmet: 0, plume: 0, trim: 0, cape: 0, boots: 0 });
 export const defaultGear = (): Gear => ({ weapon: 0, armor: 0, sub: 1, charm: 0 });
+
+// ================================================================== cave / mine mode (ids 11-15)
+export const MINE_FIRST_ID = 11;
+export const MINE_UNLOCK_STAGE = 3; // story stage that must be cleared first
+export const isMine = (id: number) => id >= MINE_FIRST_ID;
+export const MINES: StageDef[] = [
+  {
+    id: 11, name: 'เหมืองเก่าเชิงเขา', sub: 'ปากทางสู่ใต้ดิน', rec: 7,
+    theme: { g1: '#6a5a48', g2: '#5c4e3e', path: '#a08c6a', obs: 'rock', oc: '#7a6850', root: 50 },
+    enemies: [
+      { name: 'ค้างคาวเหมือง', type: 'beast', c1: '#6a5a7a', c2: '#3a2a4a' },
+      { name: 'เมือกสนิม', type: 'blob', c1: '#c0804a', c2: '#7a4a26' },
+    ],
+    boss: { name: 'หนอนแร่ยักษ์', type: 'blob', c1: '#d0a050', c2: '#6a4a1a' },
+    intro: 'เหมืองเก่าแก่ที่ถูกทิ้งร้าง เสียงหยดน้ำก้องในอุโมงค์มืด ตะเกียงของคนงานยังส่องแสงริบหรี่',
+    bossIntro: 'พื้นสั่นสะเทือน หนอนแร่ยักษ์ชูหัวขึ้นจากกองหิน!',
+    clear: 'หนอนแร่ยักษ์ล้มลง อุโมงค์ลึกลงไปอีกชั้นเปิดออกแล้ว',
+    npcs: [
+      { name: 'คนงานเหมืองเฒ่า', subject: 'science', robe: '#7a5a3a', hat: '#e0b040', lines: ['ข้าขุดแร่มาทั้งชีวิต', 'ตอบคำถามเรื่องหินและแร่ของข้าให้ได้ แล้วจะมีรางวัล'] },
+      { name: 'ช่างตีเหล็ก', subject: 'math', robe: '#8a4a2a', hat: '#c9c2b0', lines: ['แร่กองนี้ต้องชั่งให้ถูก', 'ช่วยข้าคิดเลขหน่อยเถิด'] },
+    ],
+  },
+  {
+    id: 12, name: 'อุโมงค์ผลึกเรืองแสง', sub: 'ผลึกฟ้าใต้พิภพ', rec: 9,
+    theme: { g1: '#3a4a6a', g2: '#323f5c', path: '#6a7aa0', obs: 'crystal', oc: '#5aa8e8', root: 52 },
+    enemies: [
+      { name: 'ผีผลึก', type: 'skull', c1: '#b8e0ff', c2: '#4a8aff' },
+      { name: 'เมือกน้ำแข็ง', type: 'blob', c1: '#9ad8f0', c2: '#3a8ab0' },
+    ],
+    boss: { name: 'ราชาผลึกฟ้า', type: 'skull', c1: '#8ad0ff', c2: '#2a60d0' },
+    intro: 'ผลึกเรืองแสงสีฟ้าสะท้อนไปทั่วอุโมงค์ สวยงามแต่แฝงอันตราย',
+    bossIntro: 'ผลึกทั้งอุโมงค์สั่นไหว ราชาผลึกฟ้าประกอบร่างขึ้นมา!',
+    clear: 'ราชาผลึกแตกเป็นเสี่ยง แสงสีฟ้าดับลง ทางลึกลงไปเปิดออก',
+    npcs: [
+      { name: 'นักธรณีวิทยา', subject: 'science', robe: '#3a7a9a', hat: '#e8e0c8', lines: ['ผลึกเหล่านี้เกิดจากแร่หลายล้านปี', 'ลองตอบปัญหาของข้าดูสิ'] },
+      { name: 'พ่อค้าอัญมณี', subject: 'math', robe: '#6a4a9a', hat: '#ffd84a', lines: ['อัญมณีชิ้นนี้ราคาเท่าไรนะ', 'ช่วยข้าคำนวณหน่อย'] },
+    ],
+  },
+  {
+    id: 13, name: 'ถ้ำค้างคาวหมอก', sub: 'เสียงปีกก้องในความมืด', rec: 11,
+    theme: { g1: '#4a4458', g2: '#403a4e', path: '#7a7288', obs: 'rock', oc: '#5a5268', root: 54 },
+    enemies: [
+      { name: 'ค้างคาวหมอก', type: 'beast', c1: '#8a7aa8', c2: '#3a2a5a' },
+      { name: 'ผีถ้ำ', type: 'skull', c1: '#d8d0e8', c2: '#a05aff' },
+    ],
+    boss: { name: 'ราชินีค้างคาว', type: 'beast', c1: '#7a4aa8', c2: '#2a1a48' },
+    intro: 'หมอกเย็นเยียบลอยอยู่ในถ้ำกว้าง ฝูงค้างคาวนับพันห้อยอยู่บนเพดาน',
+    bossIntro: 'เสียงกรีดร้องก้องถ้ำ ราชินีค้างคาวกางปีกพุ่งลงมา!',
+    clear: 'ราชินีค้างคาวร่วงลง ฝูงค้างคาวสงบ หมอกจางลงเผยทางลง',
+    npcs: [
+      { name: 'นักสำรวจถ้ำ', subject: 'science', robe: '#5a6a4a', hat: '#d9c27a', lines: ['ในถ้ำนี้มีสิ่งมีชีวิตแปลก ๆ เต็มไปหมด', 'ตอบคำถามของข้าได้ไหม'] },
+      { name: 'นักจารึกเก่า', subject: 'history', robe: '#8a5a7a', hat: '#e8d5a3', lines: ['ผนังถ้ำมีรอยจารึกโบราณ', 'เจ้ารู้เรื่องราวเหล่านั้นหรือไม่'] },
+    ],
+  },
+  {
+    id: 14, name: 'ธารลาวาใต้พิภพ', sub: 'ไฟแห่งใจกลางโลก', rec: 13,
+    theme: { g1: '#5a3a30', g2: '#4e322a', path: '#8a5a44', obs: 'rock', oc: '#8a3a22', root: 56 },
+    enemies: [
+      { name: 'เมือกลาวา', type: 'blob', c1: '#ff7a2a', c2: '#a8280a' },
+      { name: 'ผีเพลิงเหมือง', type: 'skull', c1: '#ffd0a0', c2: '#ff4a1a' },
+    ],
+    boss: { name: 'มังกรลาวาน้อย', type: 'beast', c1: '#e0481a', c2: '#6a1408' },
+    intro: 'ลาวาไหลเป็นสายใต้เท้า ความร้อนแผดเผาจนอากาศสั่นไหว ระวังอย่าให้ถูกไฟเผา',
+    bossIntro: 'ลาวาพุ่งสูง มังกรลาวาน้อยโผล่ขึ้นจากธารไฟ!',
+    clear: 'มังกรลาวาจมลงสู่ธารไฟ ความร้อนลดลง ทางสู่ห้องแร่ลึกที่สุดเปิดออก',
+    npcs: [
+      { name: 'ช่างหลอมโลหะ', subject: 'science', robe: '#a8481a', hat: '#e0c04a', lines: ['ไฟที่นี่ร้อนพอจะหลอมเหล็กได้', 'แต่ข้าอยากรู้ว่าเจ้ารู้เรื่องไฟแค่ไหน'] },
+      { name: 'ผู้พิทักษ์เก่า', subject: 'history', robe: '#6a3a2a', hat: '#c9b27a', lines: ['ข้าเฝ้าเหมืองนี้มาหลายร้อยปี', 'ตอบปัญหาของข้าให้ได้เสียก่อน'] },
+    ],
+  },
+  {
+    id: 15, name: 'ห้องนิรันดร์แห่งแร่', sub: 'หัวใจของเหมืองทั้งปวง', rec: 15,
+    theme: { g1: '#6a5a2a', g2: '#5c4e22', path: '#c0a050', obs: 'crystal', oc: '#e0b838', root: 58 },
+    enemies: [
+      { name: 'ผีแร่ทอง', type: 'skull', c1: '#fff0b0', c2: '#e0a020' },
+      { name: 'เมือกทองคำ', type: 'blob', c1: '#ffd84a', c2: '#a8801a' },
+    ],
+    boss: { name: 'ราชาแร่ศิลาทอง', type: 'beast', c1: '#ffd84a', c2: '#8a5a0a' },
+    intro: 'ห้องใหญ่ที่เต็มไปด้วยแร่ทองและผลึกส่องประกาย นี่คือหัวใจของเหมืองทั้งปวง',
+    bossIntro: 'ทองคำทั้งห้องหลอมรวมกัน ราชาแร่ศิลาทองลุกขึ้นยืน!',
+    clear: 'ราชาแร่ศิลาทองแตกกระจาย แร่ทองไหลออกมาเป็นสายธาร เหมืองกลับคืนสู่ความสงบ',
+    npcs: [
+      { name: 'หัวหน้าคนงานเหมือง', subject: 'math', robe: '#b8902a', hat: '#e8e0c8', lines: ['ทองคำกองนี้ต้องนับให้ถูกต้อง', 'ช่วยข้าคิดเลขหน่อยเถิด'] },
+      { name: 'ปราชญ์ใต้ดิน', subject: 'history', robe: '#6a5a8a', hat: '#ffd84a', lines: ['เหมืองนี้เก็บเรื่องราวของแผ่นดินไว้', 'ตอบคำถามของข้าให้ได้'] },
+    ],
+  },
+];
+export const getStage = (id: number): StageDef => (isMine(id) ? MINES[id - MINE_FIRST_ID] : STAGES[id - 1]);
+
+// ================================================================== world 1: islands (stages + caves become floating islands)
+export const ISLANDS: StageDef[] = [...STAGES, ...MINES];
+// recommended level per island, climbing to ~1000
+const ISLAND_RECS = [1, 10, 25, 45, 70, 100, 140, 190, 250, 320, 400, 500, 620, 780, 950];
+ISLANDS.forEach((s, i) => { s.rec = ISLAND_RECS[i]; });
+// gear unlock levels stretched to the 1-1000 range
+const scaleLv = (l: number) => (l <= 1 ? 1 : Math.round(1 + (l - 1) * 28));
+for (const arr of [WEAPONS, ARMORS, HELMETS, SUBS, CHARMS] as { minLevel: number }[][]) for (const o of arr) o.minLevel = scaleLv(o.minLevel);
+export const islandIndex = (id: number) => ISLANDS.findIndex(s => s.id === id);
+
+// ================================================================== items, crafting
+export const ITEMS: Record<string, { name: string; color: string; desc: string }> = {
+  goo: { name: 'เมือกเหนียว', color: '#8adf6a', desc: 'หยดเมือกที่หลุดจากมอนสเตอร์ ใช้คราฟอาวุธ' },
+  straw: { name: 'แกนฟางทอง', color: '#f0d050', desc: 'แกนพลังจากราชาเมือกฟาง ใช้คราฟอาวุธ' },
+};
+WEAPONS.push({ name: 'ดาบฟางทอง', minLevel: 1, atk: 14, color: '#ffd84a', glow: '#fff0a0', craft: true });
+export const CRAFT_WEAPON = WEAPONS.length - 1;
+export const RECIPES: { weapon: number; need: Record<string, number>; gold: number }[] = [
+  { weapon: CRAFT_WEAPON, need: { straw: 3, goo: 10 }, gold: 300 },
+];
+
+// every non-hub island gets its own quest-giver (the hub already has one)
+for (const st of ISLANDS) if (!st.hub) st.npcs.unshift({ name: 'ผู้ดูแลภารกิจ', subject: 'history', robe: '#2a6aa8', hat: '#ffd84a', quest: true, lines: [`ยินดีต้อนรับสู่${st.name}`, 'รับภารกิจจากข้าก่อน แล้วค่อยออกล่ามอนสเตอร์ ทำสำเร็จจะได้ EXP และทองก้อนโต'] });

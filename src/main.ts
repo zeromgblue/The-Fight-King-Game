@@ -1,8 +1,8 @@
-import { fbConfigured, watchAuth, googleSignIn, logout, loadProfile, pushProfile, type User } from './firebase';
+import { fbConfigured, watchAuth, googleSignIn, logout, loadProfile, pushProfile, rtConfigured, joinRoom, patchPresence, type Presence, type User } from './firebase';
 import './style.css';
 import {
-  STAGES, STORY_INTRO, WEAPONS, MAX_LEVEL, bestWeapon, bestArmor, ARMORS, HELMETS, SUBS, CHARMS, SKINS, HAIRS, PLUMES, TRIMS, CAPES, CAPE_NAMES, BOOTS, COLOR_NAMES,
-  expForLevel, maxHpFor, atkFor, defFor, type StageDef, type MonsterDef,
+  STAGES, ISLANDS, islandIndex, getStage, ITEMS, RECIPES, WEAPONS, MAX_LEVEL, bestWeapon, bestArmor, ARMORS, HELMETS, SUBS, CHARMS, SKINS, HAIRS, PLUMES, TRIMS, CAPES, CAPE_NAMES, BOOTS, COLOR_NAMES,
+  expForLevel, maxHpFor, atkFor, defFor, type StageDef, type MonsterDef, type Look,
 } from './data';
 import { randomQuestion } from './questions';
 import {
@@ -24,7 +24,7 @@ function resize() {
   DPR = Math.min(window.devicePixelRatio || 1, 2);
   W = Math.floor(window.innerWidth * DPR); H = Math.floor(window.innerHeight * DPR);
   canvas.width = W; canvas.height = H;
-  Z = Math.max(2, Math.round(Math.min(W, H) / 150));
+  Z = Math.max(2, Math.round(Math.min(W, H) / 200));
   vignette = document.createElement('canvas'); vignette.width = 256; vignette.height = 256;
   const v = vignette.getContext('2d')!;
   const g = v.createRadialGradient(128, 128, 60, 128, 128, 182);
@@ -35,6 +35,7 @@ window.addEventListener('resize', resize);
 resize();
 
 const TS = 16;
+const themeIx = (id: number) => (id === 0 ? 15 : id - 1);
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 const dist = (ax: number, ay: number, bx: number, by: number) => Math.hypot(ax - bx, ay - by);
@@ -42,21 +43,26 @@ function seeded(seed: number) { let s = seed >>> 0; return () => { s = (s * 1664
 const angDiff = (a: number, b: number) => { let d = a - b; while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2; return Math.abs(d); };
 
 // per-stage mood
-const AMBIENT = ['#fff6e0', '#d8ead2', '#f4e8d0', '#b8b8d0', '#bcd4c0', '#ffe8b4', '#ffe2b0', '#f6ecdc', '#c8e0c4', '#a89cdc'];
+const AMBIENT = ['#fff6e0', '#d8ead2', '#f4e8d0', '#b8b8d0', '#bcd4c0', '#ffe8b4', '#ffe2b0', '#f6ecdc', '#c8e0c4', '#a89cdc', '#c8b890', '#9cb4e8', '#a8a0c0', '#f0a880', '#f0d890', '#fff4e0'];
 const DECOR: DecorKind[][] = [
   ['flower', 'tuft', 'mush'], ['mush', 'tuft', 'flower'], ['pebble', 'bone', 'tuft'], ['pebble', 'shard'], ['mush', 'tuft', 'bone'],
   ['bone', 'pebble', 'tuft'], ['pebble', 'bone', 'tuft'], ['pebble', 'bone'], ['tuft', 'pebble', 'flower'], ['shard', 'pebble'],
+  ['pebble', 'bone'], ['shard', 'pebble'], ['bone', 'pebble', 'mush'], ['pebble', 'shard'], ['shard', 'pebble'],
+  ['flower', 'tuft', 'pebble'],
 ];
 const WEATHER = [
   { c: '#fff7b0', s: 1, vy: 3, vx: 4, g: true }, { c: '#b8e8a0', s: 1.4, vy: 6, vx: -5, g: false }, { c: '#e8d8b0', s: 1, vy: -2, vx: 10, g: false },
   { c: '#b0c8ff', s: 1, vy: -3, vx: 2, g: true }, { c: '#d0ff90', s: 1.2, vy: -2, vx: 3, g: true }, { c: '#f4d490', s: 1, vy: 1, vx: 26, g: false },
   { c: '#f0c880', s: 1, vy: 1, vx: 22, g: false }, { c: '#e8e0d0', s: 1, vy: -1, vx: 6, g: false }, { c: '#ffe890', s: 1.2, vy: -2, vx: 3, g: true },
   { c: '#e070ff', s: 1.3, vy: -10, vx: 3, g: true },
+  { c: '#d8c8a8', s: 1, vy: 2, vx: 2, g: false }, { c: '#a8d8ff', s: 1.2, vy: -2, vx: 1, g: true }, { c: '#c8b8e0', s: 1, vy: 1, vx: 8, g: false },
+  { c: '#ff9a4a', s: 1.2, vy: -9, vx: 2, g: true }, { c: '#ffe27a', s: 1.2, vy: -3, vx: 2, g: true },
+  { c: '#fff7b0', s: 1, vy: 3, vx: 4, g: true },
 ];
 
 // ================================================================== state
 let save: Save = loadSave();
-type Scene = 'title' | 'map';
+type Scene = 'title' | 'map' | 'sea';
 let scene: Scene = 'title';
 let hp = maxHpFor(save.level);
 let inStage = false;
@@ -79,8 +85,46 @@ const spMul = () => (save.gear.charm === 3 ? 1.6 : 1);
 if (!save.prepped && save.level > 1) { save.gear.weapon = WEAPONS.indexOf(bestWeapon(save.level + 0)); save.gear.armor = ARMORS.indexOf(bestArmor(save.level + 0)); }
 
 let sp = 0; // wisdom charge 0..100
+function renderHotbar() {
+  const el = $('hotbar');
+  if (el.childElementCount !== WEAPONS.length) {
+    el.innerHTML = WEAPONS.map((w, i) => `<button class="slot" data-i="${i}" aria-label="${w.name}"><span class="swd" style="--c:${w.color};--g:${w.glow}"></span><small>${i + 1}</small></button>`).join('');
+    el.querySelectorAll<HTMLButtonElement>('.slot').forEach(b => {
+      b.onclick = () => {
+        const i = +b.dataset.i!, w = WEAPONS[i];
+        if (w.craft && !save.inv['w' + i]) { sfx('wrong'); toast(`${w.name} ต้องคราฟที่ช่างตีดาบ`); return; }
+        if (w.minLevel > save.level) { sfx('wrong'); toast(`${w.name} ปลดล็อกที่เลเวล ${w.minLevel}`); return; }
+        save.gear.weapon = i; save.prepped = true; writeSave(save); sfx('equip'); refreshHud();
+      };
+    });
+  }
+  el.querySelectorAll<HTMLButtonElement>('.slot').forEach((b, i) => {
+    b.classList.toggle('on', save.gear.weapon === i);
+    const lk = WEAPONS[i].minLevel > save.level || (!!WEAPONS[i].craft && !save.inv['w' + i]);
+    b.classList.toggle('lock', lk);
+    b.title = WEAPONS[i].craft ? `${WEAPONS[i].name} (คราฟ)` : `${WEAPONS[i].name} (LV ${WEAPONS[i].minLevel})`;
+  });
+}
+// combat is only allowed while a quest from the quest-giver is active and unfinished
+const canFight = () => !!save.quest && save.quest.have < save.quest.need;
+let hintT = -9;
+function questHint() {
+  if (time - hintT < 2.5) return; hintT = time;
+  toast(save.quest ? 'ภารกิจสำเร็จแล้ว — ไปรับรางวัลและรับภารกิจใหม่ที่ผู้ดูแลภารกิจ' : 'ต้องรับภารกิจจากผู้ดูแลภารกิจก่อน ถึงจะทำดาเมจมอนสเตอร์ได้');
+}
+function refreshQuestPill() {
+  const el = $('quest-pill'), q = save.quest;
+  if (scene !== 'map') { el.classList.add('hidden'); return; }
+  if (!q) { el.classList.remove('hidden', 'done'); el.classList.add('none'); el.textContent = 'ยังไม่มีภารกิจ — รับภารกิจก่อนถึงจะตีมอนสเตอร์ได้'; return; }
+  el.classList.remove('none');
+  el.classList.remove('hidden');
+  const done = q.have >= q.need;
+  el.classList.toggle('done', done);
+  el.textContent = done ? 'ภารกิจสำเร็จ! กลับไปรับรางวัลที่ผู้ดูแลภารกิจ' : `ภารกิจ: ${q.text} ${q.have}/${q.need}`;
+}
 function refreshHud() {
-  updateHud(save.level, hp, stats().maxHp, save.level >= MAX_LEVEL ? need() : save.exp, need(), save.gold, scene === 'title' ? '' : `${stage.name}  •  มอนสเตอร์ LV ${stage.rec}-${stage.rec + 2}`);
+  renderHotbar(); refreshQuestPill();
+  updateHud(save.level, hp, stats().maxHp, save.level >= MAX_LEVEL ? need() : save.exp, need(), save.gold, scene === 'title' ? '' : scene === 'sea' ? 'ทะเลโลก 1 • ล่องเรือไปยังเกาะต่าง ๆ' : stage.town ? `${stage.name} • เขตปลอดภัย` : `${stage.name}  •  มอนสเตอร์ LV ${stage.rec}-${stage.rec + 2}`);
   ($('hud-sp') as HTMLElement).style.width = `${sp}%`;
   $('sp-bar').classList.toggle('full', sp >= 100);
   ['btn-s1', 'btn-s2', 'btn-s3'].forEach((id, i) => { const b = $(id); b.title = SKILL_NAMES[weaponIdx()][i]; b.style.borderColor = gw().glow; });
@@ -94,6 +138,7 @@ const held = { atk: false };
 const stick = { x: 0, y: 0 };
 
 window.addEventListener('keydown', e => {
+  if ((e.target as HTMLElement | null)?.tagName === 'INPUT') return;
   unlockAudio();
   if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) e.preventDefault();
   const k = e.key.toLowerCase();
@@ -107,7 +152,10 @@ window.addEventListener('keydown', e => {
     if (k === '2' || k === 'i') flags.s2 = true;
     if (k === '3' || k === 'o') flags.s3 = true;
     if (k === 'm') toggleMute();
-    if (k === 'escape') { if (panelOpen()) closeTopPanel(); else if (scene === 'map') openMenu(); }
+    if (k === 'b' && scene !== 'title' && !panelOpen()) openPrep(undefined, false, 'bag');
+    if (k === 'v' && scene !== 'title' && !panelOpen()) openPrep(undefined, false, 'body');
+    if (k === 't' && scene === 'map' && !panelOpen()) { e.preventDefault(); openChat(); }
+    if (k === 'escape') { if (panelOpen()) closeTopPanel(); else if (scene !== 'title') openMenu(); }
   }
 });
 window.addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));
@@ -144,17 +192,20 @@ bindBtn('btn-s1', 's1'); bindBtn('btn-s2', 's2'); bindBtn('btn-s3', 's3'); bindB
 function toggleMute() { setMuted(!isMuted()); $('btn-mute').classList.toggle('off', isMuted()); if (!isMuted()) sfx('click'); }
 $('btn-mute').classList.toggle('off', isMuted());
 $('btn-mute').addEventListener('click', () => { unlockAudio(); toggleMute(); });
-$('btn-home').addEventListener('click', () => { unlockAudio(); sfx('click'); if (scene === 'map' && !panelOpen()) void goHome(); });
+$('btn-home').addEventListener('click', () => { unlockAudio(); sfx('click'); if (scene !== 'title' && !panelOpen()) void goHome(); });
 $('btn-menu').addEventListener('click', () => { unlockAudio(); sfx('click'); if (scene === 'map' && !panelOpen()) openMenu(); });
 
 // ================================================================== map
+interface Prop { kind: 'house' | 'fountain' | 'lamp' | 'crate' | 'anvil' | 'bench' | 'flowerbed' | 'banner' | 'sign' | 'pier'; x: number; y: number; v: number; }
 interface Obst { x: number; y: number; spr: Sprite; sway: number; ph: number; }
 interface GameMap {
   w: number; h: number; solid: Uint8Array; water: Uint8Array; reach: Uint8Array; img: HTMLCanvasElement; obst: Obst[]; waters: { x: number; y: number; ph: number }[];
+  props: Prop[]; hub?: { x: number; y: number }; spawn?: { x: number; y: number }; npcSpots?: { x: number; y: number }[];
+  dock?: { x: number; y: number }; dockLand?: { x: number; y: number }; shipSpot?: { x: number; y: number };
   start: { x: number; y: number }; boss: { x: number; y: number }; path: { x: number; y: number }[]; spots: { x: number; y: number }[]; mm: HTMLCanvasElement;
 }
-const WATER_COL = ['#3f7ab0', '#3a7a8a', '#4a7a98', '#2a4a6a', '#3a6a5a', '#2f8ab0', '#3a86a8', '#4a80a8', '#3a6a60', '#6a3ab0'];
-const ENEMY_MAX = 18;
+const WATER_COL = ['#3f7ab0', '#3a7a8a', '#4a7a98', '#2a4a6a', '#3a6a5a', '#2f8ab0', '#3a86a8', '#4a80a8', '#3a6a60', '#6a3ab0', '#3a3a48', '#2a5a9a', '#3a3450', '#e0501a', '#d8a020', '#4a90c0'];
+const ENEMY_MAX = 26;
 
 function hexShift(hex: string, amt: number) {
   const n = parseInt(hex.slice(1), 16);
@@ -173,17 +224,17 @@ function valueNoise(w: number, h: number, scale: number, seed: number) {
 }
 
 function genMap(st: StageDef): GameMap {
-  const w = 72, h = 54;
+  const w = st.hub ? 156 : 108, h = st.hub ? 116 : 80;
   const r = seeded(st.id * 7919 + 13);
   const n1 = valueNoise(w, h, 7, st.id * 11 + 1), n2 = valueNoise(w, h, 10, st.id * 11 + 2), n3 = valueNoise(w, h, 4, st.id * 11 + 3);
   const solid = new Uint8Array(w * h), water = new Uint8Array(w * h), path = new Uint8Array(w * h);
-  const wthr = st.id === 6 ? 0.8 : 0.7;
+  const wthr = st.town ? 9 : st.id === 6 ? 0.8 : 0.7;
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
     const i = y * w + x;
     if (x === 0 || y === 0 || x === w - 1 || y === h - 1) { solid[i] = 1; continue; }
     if (n2(x, y) > wthr) water[i] = 1;
-    else if (n1(x, y) > 0.6 && r() < 0.62) solid[i] = 1;
-    else if (r() < 0.035) solid[i] = 1;
+    else if (!st.town && n1(x, y) > 0.6 && r() < 0.62) solid[i] = 1;
+    else if (r() < (st.town ? 0.004 : 0.035)) solid[i] = 1;
   }
   const carve = (cx: number, cy: number, rad: number, mark = true) => {
     for (let dy = -rad; dy <= rad; dy++) for (let dx = -rad; dx <= rad; dx++) {
@@ -209,7 +260,7 @@ function genMap(st: StageDef): GameMap {
   for (let i = 0; i < wps.length - 1; i++) trail.push(...walk(wps[i], wps[i + 1], 1));
   // side clearings (camp + treasure)
   const spots: { x: number; y: number }[] = [];
-  for (let tries = 0; tries < 200 && spots.length < 4; tries++) {
+  for (let tries = 0; tries < 700 && spots.length < (st.hub ? 9 : 6); tries++) {
     const c = { x: rnd(12, w - 12), y: rnd(10, h - 10) };
     if (Math.hypot(c.x - s.x, c.y - s.y) < 16 || Math.hypot(c.x - b.x, c.y - b.y) < 16) continue;
     if (spots.some(o => Math.hypot(o.x - c.x, o.y - c.y) < 16)) continue;
@@ -220,7 +271,39 @@ function genMap(st: StageDef): GameMap {
   }
   carve(s.x, s.y, 2); carve(b.x, b.y, 4);
   for (const [dx, dy] of [[-4, -4], [4, -4], [-4, 4], [4, 4]]) solid[(b.y + dy) * w + (b.x + dx)] = 1;
-
+  // ---- hub island: plaza with fountain, houses, market stalls
+  const props: Prop[] = [], foot: [number, number, number, number][] = [];
+  let hub: { x: number; y: number } | undefined, spawn: { x: number; y: number } | undefined, npcSpots: { x: number; y: number }[] | undefined;
+  if (st.hub) {
+    const hx = 38, hy = h - 32;
+    for (let dy = -21; dy <= 21; dy++) for (let dx = -21; dx <= 21; dx++) {
+      const dd = Math.hypot(dx, dy), x = hx + dx, y = hy + dy;
+      if (x < 1 || y < 1 || x > w - 2 || y > h - 2 || dd > 20.5) continue;
+      const i = y * w + x; solid[i] = 0; water[i] = 0; if (dd <= 13.5) path[i] = 1;
+    }
+    walk(s, { x: hx, y: hy }, 1);
+    hub = { x: hx * TS + 8, y: hy * TS + 8 }; spawn = { x: hx * TS + 8, y: (hy + 10) * TS + 8 };
+    npcSpots = [[9, 3], [-9, 2], [-8, -7], [7, -9], [-1, 21], [0, 7]].map(([dx, dy]) => ({ x: (hx + dx) * TS + 8, y: (hy + dy) * TS + 12 }));
+    props.push({ kind: 'fountain', x: hx * TS, y: hy * TS, v: 1 });
+    foot.push([hx - 2, hy - 2, 4, 4]);
+    ([[-16, -11, 0], [-5, -17, 1], [8, -17, 2], [17, -7, 0], [17, 6, 1], [-17, 5, 2]] as [number, number, number][]).forEach(([dx, dy, v]) => { props.push({ kind: 'house', x: (hx + dx) * TS, y: (hy + dy) * TS, v }); foot.push([hx + dx, hy + dy, 4, 3]); });
+    for (let k = 0; k < 10; k++) { const a = k * 0.6283 + 0.3; props.push({ kind: 'lamp', x: (hx + Math.cos(a) * 11.5) * TS + 8, y: (hy + Math.sin(a) * 11.5) * TS + 12, v: 0 }); }
+    for (let k = 0; k < 8; k++) { const a = k * 0.7854 + 0.39; props.push({ kind: 'flowerbed', x: (hx + Math.cos(a) * 6.2) * TS + 8, y: (hy + Math.sin(a) * 6.2) * TS + 10, v: k }); }
+    for (const [dx, dy] of [[-4, -4], [4, -4], [-4, 4], [4, 4]]) props.push({ kind: 'bench', x: (hx + dx) * TS + 8, y: (hy + dy) * TS + 10, v: dx > 0 ? 1 : 0 });
+    for (const [dx, dy] of [[-3, 11], [3, 11], [-11, 0], [11, 0]]) props.push({ kind: 'banner', x: (hx + dx) * TS + 8, y: (hy + dy) * TS + 12, v: dx > 0 || dy > 0 ? 1 : 0 });
+    props.push({ kind: 'sign', x: hx * TS + 8, y: (hy + 12) * TS + 8, v: 0 });
+    props.push({ kind: 'crate', x: (hx + 11) * TS + 4, y: (hy + 4) * TS + 8, v: 0 }, { kind: 'crate', x: (hx + 11) * TS + 15, y: (hy + 4) * TS + 12, v: 1 }, { kind: 'anvil', x: (hx + 7) * TS + 10, y: (hy + 4) * TS + 8, v: 0 });
+  }
+  let dock: { x: number; y: number } | undefined, dockLand: { x: number; y: number } | undefined, shipSpot: { x: number; y: number } | undefined;
+  if (st.hub && hub) {
+    const hx = Math.round((hub.x - 8) / TS), bayTop = h - 9;
+    for (let y = bayTop; y <= h - 2; y++) for (let x = hx - 11; x <= hx + 11; x++) { if (x < 1) continue; const i = y * w + x; solid[i] = 0; water[i] = 1; path[i] = 0; }
+    for (let y = Math.round((hub.y - 8) / TS) + 12; y <= bayTop + 4; y++) for (let x = hx - 1; x <= hx + 1; x++) { const i = y * w + x; solid[i] = 0; water[i] = 0; path[i] = 1; }
+    for (let x = hx - 3; x <= hx + 3; x++) for (let y = bayTop - 1; y <= bayTop; y++) { const i = y * w + x; solid[i] = 0; water[i] = 0; path[i] = 1; }
+    dock = { x: hx * TS + 8, y: (bayTop + 4) * TS + 8 }; dockLand = { x: hx * TS + 8, y: (bayTop - 2) * TS + 8 };
+    shipSpot = { x: (hx + 4) * TS + 8, y: (bayTop + 4) * TS + 12 };
+    props.push({ kind: 'pier', x: (hx - 1) * TS, y: bayTop * TS, v: 0 });
+  }
   const reach = new Uint8Array(w * h);
   const q = [s.y * w + s.x]; reach[q[0]] = 1;
   while (q.length) {
@@ -239,7 +322,7 @@ function genMap(st: StageDef): GameMap {
   const g = img.getContext('2d')!; g.imageSmoothingEnabled = false;
   const grounds = [-9, 0, 9].map((sh, t) => [0, 1, 2, 3, 4, 5].map(i => groundTile(hexShift(st.theme.g1, sh), hexShift(st.theme.g2, sh), st.id * 31 + i + t * 7)));
   const paths = [0, 1, 2, 3].map(i => pathTile(st.theme.path, st.id * 17 + i));
-  const waters = [0, 1, 2].map(i => waterTile(WATER_COL[st.id - 1], st.id * 13 + i));
+  const waters = [0, 1, 2].map(i => waterTile(WATER_COL[themeIx(st.id)], st.id * 13 + i));
   const waterList: { x: number; y: number; ph: number }[] = [];
   for (let ty = 0; ty < h; ty++) for (let tx = 0; tx < w; tx++) {
     const i = ty * w + tx, v = (tx * 7 + ty * 13);
@@ -272,10 +355,10 @@ function genMap(st: StageDef): GameMap {
     if (!path[(ty - 1) * w + tx]) g.fillRect(tx * TS, ty * TS, TS, 1);
     if (!path[(ty + 1) * w + tx]) g.fillRect(tx * TS, ty * TS + TS - 1, TS, 1);
   }
-  const decs = DECOR[st.id - 1].map((k, i) => [0, 1, 2].map(n => decorSprite(k, st.theme.g1, st.id * 53 + i * 7 + n)));
+  const decs = DECOR[themeIx(st.id)].map((k, i) => [0, 1, 2].map(n => decorSprite(k, st.theme.g1, st.id * 53 + i * 7 + n)));
   for (let ty = 1; ty < h - 1; ty++) for (let tx = 1; tx < w - 1; tx++) {
     const i = ty * w + tx;
-    if (solid[i] || water[i] || path[i] || r() > 0.36) continue;
+    if (solid[i] || water[i] || path[i] || r() > (st.hub ? 0.56 : 0.36)) continue;
     const set = decs[Math.floor(r() * decs.length)];
     g.drawImage(set[Math.floor(r() * 3)], tx * TS + Math.floor(r() * 8), ty * TS + Math.floor(r() * 8));
   }
@@ -290,15 +373,16 @@ function genMap(st: StageDef): GameMap {
     if (!solid[ty * w + tx]) continue;
     obst.push({ x: tx * TS + 8, y: ty * TS + 15, spr: variants[(tx * 5 + ty * 11) % 3], sway: st.theme.obs === 'tree' || st.theme.obs === 'cactus' ? 1 : 0, ph: (tx + ty) * 0.7 });
   }
+  for (const [fx, fy, fw, fh] of foot) for (let j = 0; j < fh; j++) for (let k = 0; k < fw; k++) solid[(fy + j) * w + fx + k] = 1;
   const mm = document.createElement('canvas'); mm.width = w; mm.height = h;
   const m = mm.getContext('2d')!;
   for (let ty = 0; ty < h; ty++) for (let tx = 0; tx < w; tx++) {
     const i = ty * w + tx;
-    m.fillStyle = water[i] ? WATER_COL[st.id - 1] : solid[i] ? hexShift(st.theme.oc, -60) : path[i] ? st.theme.path : hexShift(st.theme.g1, -10);
+    m.fillStyle = water[i] ? WATER_COL[themeIx(st.id)] : solid[i] ? hexShift(st.theme.oc, -60) : path[i] ? st.theme.path : hexShift(st.theme.g1, -10);
     m.fillRect(tx, ty, 1, 1);
   }
   const W2 = (p: { x: number; y: number }) => ({ x: p.x * TS + 8, y: p.y * TS + 12 });
-  return { w, h, solid, water, reach, img, obst, waters: waterList, mm, start: W2(s), boss: { x: b.x * TS + 8, y: b.y * TS + 16 }, path: trail, spots: spots.map(W2) };
+  return { w, h, solid, water, reach, img, obst, waters: waterList, mm, start: W2(s), boss: { x: b.x * TS + 8, y: b.y * TS + 16 }, path: trail, spots: spots.map(W2), props, hub, spawn, npcSpots, dock, dockLand, shipSpot };
 }
 
 // ================================================================== entities
@@ -326,7 +410,9 @@ let npcs: Npc[] = [];
 let parts: Part[] = [], rings: Ring[] = [], slashes: Slash[] = [], bolts: Bolt[] = [], floaters: Floater[] = [], orbs: Orb[] = [], projs: Proj[] = [], teles: Telegraph[] = [];
 let weather: { x: number; y: number; ph: number; sp: number }[] = [];
 let shake = 0, flashA = 0, hurtVig = 0, freeze = 0, slowmo = 0, comboShow = 0, comboN = 0;
-let respawnT = 0, bossAlive = true, bossAnnounced = false, nearNpc: Npc | null = null, lockToastT = 0;
+interface Pending { t: number; x: number; y: number; def: MonsterDef; elite: boolean; }
+let pending: Pending[] = [];
+let bossRespawnT = 0, respawnT = 0, bossAlive = true, bossAnnounced = false, nearNpc: Npc | null = null, lockToastT = 0;
 const cam = { x: 0, y: 0 };
 
 const P = {
@@ -369,6 +455,7 @@ function randomFreeSpot(minDist: number) {
     const x = tx * TS + 8, y = ty * TS + 12;
     if (dist(x, y, P.x, P.y) < minDist) continue;
     if (dist(x, y, map.boss.x, map.boss.y) < 60) continue;
+    if (map.hub && dist(x, y, map.hub.x, map.hub.y) < 400) continue;
     if (enemies.some(e => dist(e.x, e.y, x, y) < 24)) continue;
     return { x, y };
   }
@@ -384,6 +471,8 @@ function spawnEnemy(far = 110) {
 interface Chest { x: number; y: number; open: boolean; }
 interface Dagger { x: number; y: number; vx: number; vy: number; life: number; a: number; }
 let chests: Chest[] = [], daggers: Dagger[] = [];
+interface Loot { x: number; y: number; vx: number; vy: number; t: number; id: string; }
+let loots: Loot[] = [];
 const orbHit = new Map<Enemy, number>();
 let expl = new Uint8Array(1), mmShow: HTMLCanvasElement | null = null, lastTile = -1, mmT = 0;
 const mmEl = $('minimap') as HTMLCanvasElement;
@@ -399,53 +488,75 @@ function revealMap() {
     const i = y * map.w + x; if (expl[i]) continue; expl[i] = 1; c.drawImage(map.mm, x, y, 1, 1, x, y, 1, 1);
   }
 }
+let arriveFromSea = false;
+// quest-giver outpost: right beside the nearest monster-farming spot so nobody has to walk far
+function farmOutpost(): { x: number; y: number } | null {
+  const hub = map.hub, ref = hub ?? map.start;
+  const cands = map.spots.filter(sp => !hub || dist(sp.x, sp.y, hub.x, hub.y) > 420).sort((a, b) => dist(a.x, a.y, ref.x, ref.y) - dist(b.x, b.y, ref.x, ref.y));
+  for (const sp of cands) for (const [ox, oy] of [[-34, 26], [34, 26], [-34, -26], [34, -26], [0, 38], [0, -38]]) {
+    const x = sp.x + ox, y = sp.y + oy;
+    if (!blockedAt(x, y, 6)) return { x, y };
+  }
+  return null;
+}
+let shipCall: { st: 'none' | 'coming' | 'moored'; t: number } = { st: 'none', t: 0 };
 function startStage(id: number) {
-  stage = STAGES[id - 1];
+  stage = getStage(id);
   map = genMap(stage);
-  P.x = map.start.x; P.y = map.start.y; P.inv = 1.5; P.dead = false; P.swingT = 0; P.dashT = 0; P.fa = 0.3; P.subT = 0.5; P.orbA = 0;
+  { const fo = !stage.hub ? farmOutpost() : null, pi = map.path[Math.min(8, map.path.length - 1)];
+    const inland = fo ? (!blockedAt(fo.x, fo.y + 22, 5) ? { x: fo.x, y: fo.y + 22 } : fo) : pi && !blockedAt(pi.x * TS + 8, pi.y * TS + 12) ? { x: pi.x * TS + 8, y: pi.y * TS + 12 } : map.start;
+    const at = stage.hub && map.spawn ? map.spawn : inland; shipCall = { st: stage.hub && arriveFromSea ? 'moored' : 'none', t: 1 }; P.x = at.x; P.y = at.y; arriveFromSea = false; }
+  P.inv = 1.5; P.dead = false; P.swingT = 0; P.dashT = 0; P.fa = 0.3; P.subT = 0.5; P.orbA = 0;
   cam.x = P.x - W / Z / 2; cam.y = P.y - H / Z / 2;
   enemies = []; parts = []; rings = []; slashes = []; bolts = []; floaters = []; orbs = []; projs = []; teles = []; daggers = []; puddles = []; waves = [];
-  orbHit.clear();
-  for (const sp0 of map.spots) for (let k = 0; k < 3; k++) {
+  orbHit.clear(); loots = [];
+  if (!stage.town) for (const sp0 of map.spots) for (let k = 0; k < 3; k++) {
     const a = k * 2.1 + rand(0, 1), x = sp0.x + Math.cos(a) * 24, y = sp0.y + Math.sin(a) * 20;
     if (blockedAt(x, y, 7)) continue;
+    if (map.hub && dist(x, y, map.hub.x, map.hub.y) < 400) continue;
     const def = stage.enemies[Math.floor(Math.random() * stage.enemies.length)];
     const el = k === 0; const e = mkEnemy(def, stage.rec + (el ? 2 : Math.random() < 0.5 ? 0 : 1), false, x, y, el); enemies.push(e);
   }
-  chests = map.spots.map(s0 => ({ x: s0.x, y: s0.y, open: false }));
-  while (enemies.length < ENEMY_MAX) { const before = enemies.length; spawnEnemy(100); if (enemies.length === before) break; }
-  bossAlive = true; bossAnnounced = false;
-  const bd = stage.boss;
-  const boss = mkEnemy(bd, stage.rec + 2, true, map.boss.x, map.boss.y); boss.flip = -1;
-  enemies.push(boss);
+  chests = stage.town ? [] : map.spots.map(s0 => ({ x: s0.x, y: s0.y, open: false }));
+  while (!stage.town && enemies.length < ENEMY_MAX) { const before = enemies.length; spawnEnemy(100); if (enemies.length === before) break; }
+  bossAlive = !stage.town; bossAnnounced = false; bossRespawnT = 0;
+  if (!stage.town) { const boss = mkEnemy(stage.boss, stage.rec + 2, true, map.boss.x, map.boss.y); boss.flip = -1; enemies.push(boss); }
   npcs = [];
-  [0.3, 0.62].forEach((f, idx) => {
-    const t = map.path[Math.floor(map.path.length * f)];
+  stage.npcs.forEach((_d, idx) => {
+    const f = (idx + 1) / (stage.npcs.length + 1);
+    const t = stage.npcs[idx].quest && !map.npcSpots ? map.path[Math.min(12, map.path.length - 1)] : map.path[Math.floor(map.path.length * f)];
     const d = stage.npcs[idx];
     let nx = t.x * TS + 8, ny = t.y * TS + 30;
+    if (map.npcSpots && map.npcSpots[idx]) { nx = map.npcSpots[idx].x; ny = map.npcSpots[idx].y; }
+    if (d.quest && (d.outpost || !map.npcSpots)) { const fo = farmOutpost(); if (fo) { nx = fo.x; ny = fo.y; } }
     if (blockedAt(nx, ny)) { nx = t.x * TS + 26; ny = t.y * TS + 12; }
     if (blockedAt(nx, ny)) { nx = t.x * TS + 8; ny = t.y * TS + 12; }
     npcs.push({ x: nx, y: ny, idx, spr: npcSprite(d.robe, d.hat) });
   });
-  const wc = WEATHER[id - 1];
+  const wc = WEATHER[themeIx(id)];
   weather = Array.from({ length: wc.g ? 34 : 46 }, () => ({ x: Math.random(), y: Math.random(), ph: rand(0, 6), sp: rand(0.6, 1.4) }));
-  respawnT = 8; sp = Math.min(sp, 60);
+  respawnT = 8; pending = []; sp = Math.min(sp, 60);
   expl = new Uint8Array(map.w * map.h); lastTile = -1;
   mmShow = document.createElement('canvas'); mmShow.width = map.w; mmShow.height = map.h;
   const mc = mmShow.getContext('2d')!; mc.fillStyle = '#05030a'; mc.fillRect(0, 0, map.w, map.h);
+  mc.drawImage(map.mm, 0, 0); expl.fill(1);
   mmEl.width = map.w; mmEl.height = map.h; mmEl.classList.remove('hidden');
   revealMap();
   scene = 'map'; inStage = true;
+  $('touch').classList.remove('sea'); $('btn-dodge').textContent = 'พุ่ง';
   $('hud').classList.remove('hidden'); $('touch').classList.remove('hidden'); $('bossbar').classList.add('hidden'); $('side-btns').classList.remove('hidden'); gpsKey = ''; gpsT = 0;
   setMusic('map', id);
   refreshHud();
+  $('chatlog').classList.remove('hidden'); joinIslandRoom();
 }
 
 async function enterStage(id: number) {
   closeAllPanels();
   startStage(id);
-  if (!save.cleared.includes(id)) {
-    await dialog(`ด่าน ${id}: ${stage.name}`, [stage.intro, `เลเวลที่แนะนำ: ${stage.rec}  |  บอสประจำด่าน: ${stage.boss.name}`], 'ออกเดินทาง');
+  save.loc = { kind: 'island', id }; writeSave(save);
+  if (!save.quests[`visit-${id}`]) {
+    save.quests[`visit-${id}`] = true; writeSave(save);
+    await dialog(`เกาะที่ ${islandIndex(id) + 1}: ${stage.name}`, [stage.intro, `เลเวลที่แนะนำ: ${stage.rec}  |  บอสประจำด่าน: ${stage.boss.name}`], 'ออกเดินทาง');
   }
 }
 
@@ -494,7 +605,7 @@ function levelUpFx(lu: LevelUp) {
   writeSave(save);
   if (wNew !== wOld) unlocks.push(`ดาบประจำตัวพัฒนา: ${wNew.name}`);
   if (aNew !== aOld) unlocks.push(`เกราะใหม่: ${aNew.name}`);
-  for (const s of STAGES) if (s.rec > lu.from && s.rec <= lu.to && (s.id === 1 || save.cleared.includes(s.id - 1))) unlocks.push(`ปลดล็อกด่าน: ${s.name}`);
+  for (const s of ISLANDS) if (s.rec > lu.from && s.rec <= lu.to) unlocks.push(`ปลดล็อกเกาะ: ${s.name}`);
   for (const grp of [HELMETS, SUBS, CHARMS]) for (const o of grp) if (o.minLevel > lu.from && o.minLevel <= lu.to) unlocks.push('ปลดล็อกในหน้าเตรียมตัว: ' + o.name);
   banner(`LEVEL ${lu.to}`, [`ฟื้นฟูพลังเต็ม  โจมตี ${stats().atk}  ป้องกัน ${stats().def}`, ...unlocks], 3600);
   for (let i = 0; i < 4; i++) setTimeout(() => ring(P.x, P.y - 8, 34 + i * 10, i % 2 ? '#fff6b0' : '#ffd84a', 0.7, 2.5), i * 90);
@@ -539,17 +650,20 @@ async function playerDie() {
 // ================================================================== weapon skills (no quiz needed)
 const SKILL_CD = 1; // seconds per skill (tunable)
 const SKILL_NAMES: string[][] = [
+  /* index 0..5 below, crafted sword appended after the array */
   ['คลื่นกระแทก', 'หมุนพลอง', 'พุ่งทุบ'],
   ['คลื่นสำริด', 'วงฟันสำริด', 'พุ่งฟันสำริด'],
   ['คลื่นเหล็กกล้า', 'วงดาบเหล็ก', 'พุ่งทะลวง'],
   ['คลื่นเพลิง', 'วงเพลิงนรก', 'พุ่งอัคคี'],
   ['คลื่นสายฟ้า', 'พายุฟ้าผ่า', 'พุ่งอสนี'],
   ['ลมหายใจมังกร', 'วงน้ำแข็งแช่แข็ง', 'พุ่งธารน้ำแข็ง'],
+  ['คลื่นฟางทอง', 'วงทองคำ', 'พุ่งแสงทอง'],
 ];
 interface Wave { x: number; y: number; vx: number; vy: number; life: number; dmg: number; ang: number; wi: number; hit: Set<Enemy>; }
 let waves: Wave[] = [];
 
 function elemOnHit(e: Enemy, dmg: number, wi: number) {
+  if (!canFight()) return;
   if (wi === 3) { e.burn = 2.4; burst(e.x, e.y - 8, ['#ff7a2f', '#ffcf4a', '#ff3a1a'], 8, 40, 40); }
   if (wi === 4) {
     let chain = 0;
@@ -691,6 +805,7 @@ function swingHit() {
 
 function hitEnemy(e: Enemy, dmg: number, ang: number, kb: number, big: boolean, power: boolean, silent = false) {
   if (e.dead) return;
+  if (!canFight()) { questHint(); return; } // monsters can only be hurt while a quest is active
   e.hp -= dmg; e.flash = 0.1; e.hurtT = 2.2;
   const kk = e.boss ? 0.15 : 1; e.kx += Math.cos(ang) * kb * kk; e.ky += Math.sin(ang) * kb * kk;
   if (!e.boss && e.st === 'wind' && (!e.elite || Math.random() < 0.5)) { e.st = 'idle'; e.cd = 0.6; teles = teles.filter(t => t.owner !== e); }
@@ -712,11 +827,27 @@ function killEnemy(e: Enemy) {
   ring(e.x, e.y - 6, e.boss ? 70 : 24, '#fff', 0.45, 2.5);
   sfx('crit');
   const mult = e.boss ? 5 : e.elite ? 2.5 : 1;
-  const xp = Math.round((10 + e.level * 12) * mult), gold = Math.round((5 + e.level * 4) * mult);
+  const xp = Math.max(1, Math.round((10 + e.level * 12) * mult * 0.35)), gold = Math.round((5 + e.level * 4) * mult);
   save.gold += gold; sp = Math.min(100, sp + (e.boss ? 0 : 18) * spMul());
   floater(e.x, e.y - 22 * e.scale, `+${xp} EXP`, '#7fe0ff', true);
   floater(e.x, e.y - 30 * e.scale, `+${gold}`, '#ffd84a', false);
+  const dr = stage.drops;
+  if (dr) {
+    const give = (id: string, n: number) => { for (let i = 0; i < n; i++) loots.push({ x: e.x, y: e.y - 6, vx: rand(-45, 45), vy: rand(-95, -45), t: 0, id }); sfx('chest'); };
+    if (e.boss) give(dr.boss[0], dr.boss[1] + Math.floor(Math.random() * (dr.boss[2] - dr.boss[1] + 1)));
+    else if (Math.random() < dr.mob[1] * (e.elite ? 1.6 : 1)) give(dr.mob[0], 1);
+  }
   for (let i = 0; i < (e.boss ? 14 : 4); i++) orbs.push({ x: e.x, y: e.y - 6, vx: rand(-50, 50), vy: rand(-80, -20), t: 0, gold: i % 2 === 0 });
+  let questJustDone = false;
+  const q = save.quest;
+  if (q && q.have < q.need) {
+    const hit = q.kind === 'kill' || (q.kind === 'elite' && e.elite && !e.boss) || (q.kind === 'boss' && e.boss);
+    if (hit) {
+      q.have++;
+      if (q.have >= q.need) questJustDone = true;
+      else floater(e.x, e.y - 52 * e.scale, `ภารกิจ ${q.have}/${q.need}`, '#9affb0', false);
+    }
+  }
   const lu = addExp(xp);
   if (!lu) hp = Math.min(stats().maxHp, hp + Math.round(stats().maxHp * (e.boss ? 0 : 0.06)));
   writeSave(save);
@@ -724,22 +855,26 @@ function killEnemy(e: Enemy) {
   comboShow = 1.6;
   if (lu) levelUpFx(lu);
   refreshHud();
+  if (questJustDone) claimQuest(!!lu);
   if (e.boss) { slowmo = 1.6; flashA = 0.7; void bossDefeated(); }
-  else enemies = enemies.filter(x => x !== e);
+  else { enemies = enemies.filter(x => x !== e); if (pending.length < 40) pending.push({ t: 7 + Math.random() * 5, x: e.x, y: e.y, def: e.def, elite: e.elite }); }
 }
 
 async function bossDefeated() {
-  bossAlive = false; setMusic('off'); sfx('win');
+  bossAlive = false; sfx('win');
   $('bossbar').classList.add('hidden');
   projs = []; teles = [];
-  await new Promise(r => setTimeout(r, 1700));
-  enemies = enemies.filter(x => !x.boss);
   if (!save.cleared.includes(stage.id)) save.cleared.push(stage.id);
   writeSave(save);
-  await dialog('ด่านสำเร็จ', [stage.clear], stage.id === 10 ? 'ถึงตอนจบ' : 'ไปต่อ');
-  if (stage.id === 10) await dialog('ตอนจบ', ['เจ้าได้นำความรู้และประวัติศาสตร์กลับคืนสู่แผ่นดิน ชื่อของเจ้าจะถูกจารึกไว้ตลอดกาล', 'ขอบคุณที่ร่วมผจญภัย — เจ้ายังกลับไปฟาร์มเลเวลและเก็บภารกิจที่เหลือได้เสมอ'], 'กลับสู่แผนที่');
-  setMusic('map', stage.theme.root);
-  openStageSelect();
+  banner('บอสพ่ายแพ้!', [stage.clear, 'บอสจะกลับมาอีกครั้งใน 45 วินาที'], 4200);
+  await new Promise(r => setTimeout(r, 1700));
+  enemies = enemies.filter(x => !x.boss);
+  bossRespawnT = 45;
+}
+function respawnBoss() {
+  const boss = mkEnemy(stage.boss, stage.rec + 2, true, map.boss.x, map.boss.y); boss.flip = -1;
+  enemies.push(boss); bossAlive = true; bossAnnounced = false; bossRespawnT = 0;
+  toast('บอสกลับมาแล้ว!');
 }
 
 function refreshBossBar() {
@@ -781,6 +916,15 @@ function ultimate() {
 async function talkNpc(n: Npc) {
   const def = stage.npcs[n.idx];
   const key = `${stage.id}-${n.idx}`;
+  if (def.harbor) {
+    if (shipCall.st === 'moored') { await dialogP(n.spr, def.name, ['เรือของเจ้าจอดรออยู่ที่ท่าแล้ว เดินไปที่ปลายท่าเรือแล้วขึ้นเรือได้เลย']); return; }
+    if (shipCall.st === 'coming') { await dialogP(n.spr, def.name, ['เรือของเจ้ากำลังเข้าท่า รอสักครู่']); return; }
+    await dialogP(n.spr, def.name, def.lines);
+    if (await confirmBox('เรียกเรือ', 'ให้เรือของเจ้าแล่นเข้าท่าตอนนี้ไหม?', 'เรียกเรือ', 'ไว้ก่อน')) { shipCall = { st: 'coming', t: 0 }; sfx('equip'); toast('กำลังเรียกเรือของคุณเข้าท่า...'); }
+    return;
+  }
+  if (def.quest) { if (!save.quest && save.questDone === 0) await dialogP(n.spr, def.name, def.lines); openQuest(); return; }
+  if (!def.quiz) { await dialogP(n.spr, def.name, def.lines); if (def.craft) openCraft(); return; }
   if (save.quests[key]) { await dialogP(n.spr, def.name, ['ขอบใจนะผู้กล้า เจ้าช่วยข้าไว้มากจริง ๆ ขอให้โชคดีตลอดทาง']); return; }
   await dialogP(n.spr, def.name, def.lines);
   const yes = await confirmBox('ภารกิจจากชาวบ้าน', 'ตอบคำถาม 3 ข้อ ถูกอย่างน้อย 2 ข้อถือว่าสำเร็จ รับ EXP และทองเป็นรางวัล', 'รับภารกิจ', 'ไว้ก่อน');
@@ -807,6 +951,72 @@ async function talkNpc(n: Npc) {
 
 // ================================================================== menus
 const dialogP = (por: Sprite, who: string, lines: string[], btn = 'ต่อไป') => dialog(who, lines, btn, por);
+
+const QUEST_TPL: { kind: 'kill' | 'elite' | 'boss'; need: number; mul: number; text: string }[] = [
+  { kind: 'kill', need: 5, mul: 0.5, text: 'ปราบมอนสเตอร์ 5 ตัว' },
+  { kind: 'kill', need: 12, mul: 1.2, text: 'ปราบมอนสเตอร์ 12 ตัว' },
+  { kind: 'elite', need: 2, mul: 1.0, text: 'ปราบมอนสเตอร์ตัวแข็ง 2 ตัว' },
+  { kind: 'boss', need: 1, mul: 2.0, text: 'ปราบบอสประจำเกาะ 1 ตัว' },
+];
+const questReward = (mul: number) => ({ xp: Math.max(1, Math.round(expForLevel(save.level) * mul)), gold: Math.round((30 + save.level * 4) * mul) });
+// the reward is paid the moment the quest is finished; a new quest must be taken from the quest-giver before fighting again
+function claimQuest(afterLevelUp: boolean) {
+  const q = save.quest; if (!q) return;
+  const r = questReward(q.mul);
+  save.gold += r.gold; save.quest = null; save.questDone++;
+  const lu = addExp(r.xp); writeSave(save); refreshHud(); sfx('win'); sfx('coin');
+  const show = () => {
+    if (lu) levelUpFx(lu);
+    else banner('ภารกิจสำเร็จ!', [`ได้รับ EXP +${r.xp}  ทอง +${r.gold}`, 'รับภารกิจใหม่ที่ผู้ดูแลภารกิจเพื่อสู้ต่อ'], 3600);
+  };
+  if (afterLevelUp) setTimeout(show, 1400); else show();
+}
+function openQuest() {
+  const q = save.quest;
+  const head = '<h2>ผู้ดูแลภารกิจ</h2><div class="sub">ทำภารกิจต่อเนื่องเพื่อรับ EXP และทอง ใช้อัปเลเวล</div>';
+  if (!q) {
+    let t = QUEST_TPL[save.questDone % QUEST_TPL.length];
+    if (t.kind === 'boss' && save.level < 2) t = QUEST_TPL[0];
+    const r = questReward(t.mul);
+    const p = panel(`${head}<div class="rc"><div class="rc-h"><b>${t.text}</b><small>ภารกิจที่ ${save.questDone + 1}</small></div><div class="rc-n"><span class="ok">EXP +${r.xp}</span><span class="ok">ทอง +${r.gold}</span></div><button class="btn gold" id="q-take">รับภารกิจ</button></div><div class="row"><button class="btn alt" id="q-close">ปิด</button></div>`);
+    (p.el.querySelector('#q-take') as HTMLElement).onclick = () => { save.quest = { kind: t.kind, need: t.need, have: 0, mul: t.mul, text: t.text }; writeSave(save); sfx('equip'); p.close(); refreshHud(); toast(`รับภารกิจ: ${t.text}`); };
+    (p.el.querySelector('#q-close') as HTMLElement).onclick = () => { sfx('click'); p.close(); };
+  } else if (q.have < q.need) {
+    const p = panel(`${head}<div class="rc"><div class="rc-h"><b>${q.text}</b><small>กำลังทำ</small></div><div class="rc-n"><span class="${q.have > 0 ? 'ok' : 'no'}">ความคืบหน้า ${q.have}/${q.need}</span></div></div><div class="row"><button class="btn alt" id="q-close">ปิด</button><button class="btn" id="q-drop">ยกเลิกภารกิจ</button></div>`);
+    (p.el.querySelector('#q-close') as HTMLElement).onclick = () => { sfx('click'); p.close(); };
+    (p.el.querySelector('#q-drop') as HTMLElement).onclick = async () => { if (await confirmBox('ยกเลิกภารกิจ?', 'ความคืบหน้าจะหายไป', 'ยกเลิกภารกิจ', 'กลับ')) { save.quest = null; writeSave(save); p.close(); refreshHud(); } };
+  } else {
+    const r = questReward(q.mul);
+    const p = panel(`${head}<div class="rc"><div class="rc-h"><b>${q.text}</b><small>สำเร็จแล้ว!</small></div><div class="rc-n"><span class="ok">EXP +${r.xp}</span><span class="ok">ทอง +${r.gold}</span></div><button class="btn gold" id="q-claim">รับรางวัล</button></div>`);
+    (p.el.querySelector('#q-claim') as HTMLElement).onclick = () => {
+      save.gold += r.gold; save.quest = null; save.questDone++; sfx('coin');
+      const lu = addExp(r.xp); writeSave(save); p.close(); refreshHud();
+      if (lu) levelUpFx(lu); else banner('รับรางวัลแล้ว', [`EXP +${r.xp}  ทอง +${r.gold}`], 2600);
+      setTimeout(openQuest, lu ? 3200 : 1200);
+    };
+  }
+}
+
+function openCraft() {
+  const have = (k: string) => save.inv[k] ?? 0;
+  const rows = RECIPES.map((r, ri) => {
+    const w = WEAPONS[r.weapon], owned = !!save.inv['w' + r.weapon];
+    const can = !owned && Object.entries(r.need).every(([k, n]) => have(k) >= n) && save.gold >= r.gold;
+    const needs = Object.entries(r.need).map(([k, n]) => `<span class="${have(k) >= n ? 'ok' : 'no'}">${ITEMS[k].name} ${have(k)}/${n}</span>`).join('') + `<span class="${save.gold >= r.gold ? 'ok' : 'no'}">ทอง ${save.gold}/${r.gold}</span>`;
+    return `<div class="rc"><div class="rc-h"><b>${esc(w.name)}</b><small>โจมตี +${w.atk} • สกิลพิเศษ</small></div><div class="rc-n">${needs}</div><button class="btn ${can ? 'gold' : ''}" data-i="${ri}" ${can ? '' : 'disabled'}>${owned ? 'มีแล้ว' : 'คราฟ'}</button></div>`;
+  }).join('');
+  const p = panel(`<h2>ช่างตีดาบ</h2><div class="sub">เอาวัตถุดิบจากมอนสเตอร์และบอสมาตีเป็นอาวุธ</div>${rows}<div class="row"><button class="btn alt" id="rc-close">ปิด</button></div>`);
+  p.el.querySelectorAll<HTMLButtonElement>('.rc .btn[data-i]').forEach(b => {
+    b.onclick = () => {
+      const r = RECIPES[+b.dataset.i!];
+      for (const [k, n] of Object.entries(r.need)) save.inv[k] = have(k) - n;
+      save.gold -= r.gold; save.inv['w' + r.weapon] = 1; save.gear.weapon = r.weapon; save.prepped = true; writeSave(save);
+      sfx('equip'); sfx('levelup'); p.close(); refreshHud();
+      banner('คราฟสำเร็จ!', [`ได้ ${WEAPONS[r.weapon].name} และสวมใส่แล้ว`], 3600);
+    };
+  });
+  (p.el.querySelector('#rc-close') as HTMLElement).onclick = () => { sfx('click'); p.close(); };
+}
 
 function openChest(c: Chest) {
   c.open = true; sfx('chest');
@@ -841,16 +1051,18 @@ function drawPreview(cv: HTMLCanvasElement, dirIdx: number) {
 
 type Row = { h: string } | { html: string; on: boolean; locked: boolean; cls: string; pick: () => void };
 
-function openPrep(done?: () => void, forceDone = false) {
-  let tab = 'body', dirIdx = 0;
+function openPrep(done?: () => void, forceDone = false, startTab = 'body') {
+  let tab = startTab, dirIdx = 0;
+  const BAG_TABS = ['bag', 'weapon', 'armor', 'sub', 'charm'], bagMode = BAG_TABS.includes(startTab);
   const p = panel(
-    `<h2>เตรียมตัวออกศึก</h2><div class="sub">แต่งกายและเลือกอุปกรณ์ของอัศวิน — ไอเท็มใหม่ปลดล็อกตามเลเวล (แตะตัวละครเพื่อหมุนดู)</div>` +
+    `<h2>${bagMode ? 'กระเป๋า' : 'แต่งตัว'}</h2><div class="sub">${bagMode ? 'ดูไอเทม วัตถุดิบ และสวมใส่อุปกรณ์ — ปลดล็อกตามเลเวลหรือคราฟ' : 'เปลี่ยนหน้าตาและเสื้อผ้าของอัศวิน (แตะตัวละครเพื่อหมุนดู)'}</div>` +
     `<div class="prep-body"><div><div class="prep-view"><canvas id="pv" width="40" height="48"></canvas></div><div class="prep-stats" id="pst"></div></div>` +
-    `<div><div class="tabs" id="tabs"></div><div class="opts" id="opts"></div></div></div><button class="btn gold" id="prep-ok">พร้อมออกเดินทาง</button>`);
+    `<div><div class="tabs" id="tabs"></div><div class="opts" id="opts"></div></div></div><button class="btn gold" id="prep-ok">${forceDone ? 'พร้อมออกเดินทาง' : 'ปิด'}</button>`);
   p.el.classList.add('prep');
   if (forceDone) p.onX = () => (p.el.querySelector('#prep-ok') as HTMLElement).click();
   const pv = p.el.querySelector('#pv') as HTMLCanvasElement, tabsEl = p.el.querySelector('#tabs') as HTMLElement, optsEl = p.el.querySelector('#opts') as HTMLElement, pst = p.el.querySelector('#pst') as HTMLElement;
-  const TABS: [string, string][] = [['body', 'ร่างกาย'], ['head', 'ศีรษะ'], ['armor', 'เกราะ'], ['cape', 'ผ้าคลุม'], ['boots', 'รองเท้า'], ['weapon', 'ดาบ'], ['sub', 'อาวุธเสริม'], ['charm', 'เครื่องราง']];
+  const ALL_TABS: [string, string][] = [['bag', 'วัตถุดิบ'], ['weapon', 'ดาบ'], ['armor', 'เกราะ'], ['sub', 'อาวุธเสริม'], ['charm', 'เครื่องราง'], ['body', 'ร่างกาย'], ['head', 'ศีรษะ'], ['trim', 'สีเกราะ'], ['cape', 'ผ้าคลุม'], ['boots', 'รองเท้า']];
+  const TABS = ALL_TABS.filter(([k]) => BAG_TABS.includes(k) === bagMode);
   const sw = (c: string | null) => `<span class="sw" style="background:${c ?? '#cdbb86'}"></span>`;
 
   const colorSet = (title: string, colors: (string | null)[], names: string[], cur: number, set: (i: number) => void): Row[] => [
@@ -864,12 +1076,23 @@ function openPrep(done?: () => void, forceDone = false) {
   const rowsFor = (): Row[] => {
     const L = save.look, G = save.gear;
     switch (tab) {
+      case 'bag': {
+        const rows: Row[] = [{ h: `วัตถุดิบและไอเทม • ทอง ${save.gold}` }];
+        for (const [k, it] of Object.entries(ITEMS)) {
+          const n = save.inv[k] ?? 0;
+          rows.push({ html: `<span class="sw" style="background:${it.color}"></span>${it.name} ×${n}<small>${n ? it.desc : 'ยังไม่มี — ล่ามอนสเตอร์เพื่อเก็บ'}</small>`, on: false, locked: n === 0, cls: '', pick: () => { toast(it.desc); } });
+        }
+        rows.push({ h: 'อาวุธที่คราฟแล้ว' });
+        WEAPONS.forEach((w, wi) => { if (w.craft) rows.push({ html: `${w.name}<small>${save.inv['w' + wi] ? 'ไปที่แท็บ "ดาบ" เพื่อสวมใส่' : 'ยังไม่ได้คราฟ — ไปที่ช่างตีดาบ'}</small>`, on: save.gear.weapon === wi, locked: !save.inv['w' + wi], cls: '', pick: () => { tab = 'weapon'; } }); });
+        return rows;
+      }
       case 'body': return [...colorSet('สีผิว', SKINS, COLOR_NAMES.skin, L.skin, i => { L.skin = i; }), ...colorSet('สีผม', HAIRS, COLOR_NAMES.hair, L.hair, i => { L.hair = i; })];
       case 'head': return [...itemSet('หมวก / เครื่องประดับศีรษะ', HELMETS, L.helmet, i => { L.helmet = i; }), ...colorSet('สีพู่ / ผ้าคาดศีรษะ', PLUMES, COLOR_NAMES.plume, L.plume, i => { L.plume = i; })];
-      case 'armor': return [...itemSet('เกราะ', ARMORS.map(a => ({ name: a.name, desc: `ป้องกัน +${a.def}`, minLevel: a.minLevel })), G.armor, i => { G.armor = i; }), ...colorSet('สีขอบเกราะและเข็มขัด', TRIMS, COLOR_NAMES.trim, L.trim, i => { L.trim = i; })];
+      case 'armor': return itemSet('เกราะ', ARMORS.map(a => ({ name: a.name, desc: `ป้องกัน +${a.def}`, minLevel: a.minLevel })), G.armor, i => { G.armor = i; });
+      case 'trim': return colorSet('สีขอบเกราะและเข็มขัด', TRIMS, COLOR_NAMES.trim, L.trim, i => { L.trim = i; });
       case 'cape': return colorSet('ผ้าคลุม', CAPES, CAPE_NAMES, L.cape, i => { L.cape = i; });
       case 'boots': return colorSet('รองเท้าบู๊ต', BOOTS, COLOR_NAMES.boots, L.boots, i => { L.boots = i; });
-      case 'weapon': return itemSet('ดาบประจำตัว', WEAPONS.map(w => ({ name: w.name, desc: `โจมตี +${w.atk}`, minLevel: w.minLevel })), G.weapon, i => { G.weapon = i; });
+      case 'weapon': return itemSet('ดาบประจำตัว', WEAPONS.map((w, wi) => ({ name: w.name, desc: w.craft ? `โจมตี +${w.atk} • คราฟเอง` : `โจมตี +${w.atk}`, minLevel: w.craft && !save.inv['w' + wi] ? 99999 : w.minLevel })), G.weapon, i => { G.weapon = i; });
       case 'sub': return itemSet('อาวุธเสริม (ใช้งานอัตโนมัติ)', SUBS, G.sub, i => { G.sub = i; });
       default: return itemSet('เครื่องราง', CHARMS, G.charm, i => { G.charm = i; });
     }
@@ -929,9 +1152,9 @@ let gpsField: Int16Array | null = null;
 
 function currentObjective() {
   if (!bossAlive) return null;
-  for (let i = 0; i < stage.npcs.length; i++) {
-    const n = npcs.find(x => x.idx === i);
-    if (n && !save.quests[`${stage.id}-${i}`]) return { x: n.x, y: n.y, text: `ไปคุยกับ ${stage.npcs[i].name} เพื่อรับภารกิจ`, kind: 'npc' };
+  if (!canFight()) {
+    const qn = npcs.filter(n => stage.npcs[n.idx].quest).sort((a, b) => dist(a.x, a.y, P.x, P.y) - dist(b.x, b.y, P.x, P.y))[0];
+    return qn ? { x: qn.x, y: qn.y, text: save.quest ? 'กลับไปรับรางวัลภารกิจ' : 'ไปรับภารกิจจากผู้ดูแลภารกิจ', kind: 'npc' } : null;
   }
   if (save.level < stage.rec + 1) {
     let best: Enemy | null = null, bd = 1e9;
@@ -1010,12 +1233,13 @@ function renderMini(c: CanvasRenderingContext2D) {
 function drawMinimap() { renderMini(mmEl.getContext('2d')!); }
 
 function openWorldMap() {
+  if (scene === 'sea') { openSeaChart(); return; }
   if (scene !== 'map' || !mmShow) return;
   const p = panel(
     `<h2>แผนที่ ${esc(stage.name)}</h2><div class="sub">${gpsTarget ? esc(gpsTarget.text) : 'สำรวจเพื่อเปิดเผยแผนที่'}</div>` +
     `<canvas id="wm" class="wm"></canvas>` +
     `<div class="legend"><span><i style="background:#fff"></i>คุณ</span><span><i style="background:#ffd84a"></i>NPC</span><span><i style="background:#ff9a3a"></i>หีบสมบัติ</span><span><i style="background:#ff3a3a"></i>บอส</span><span><i style="background:#ffe27a"></i>เส้นทางนำทาง</span></div>` +
-    `<div class="row"><button class="btn alt" id="wm-close">ปิด</button><button class="btn" id="wm-stage">เลือกด่าน</button></div>`);
+    `<div class="row"><button class="btn alt" id="wm-close">ปิด</button><button class="btn" id="wm-stage">กลับล็อบบี้</button></div>`);
   const cv = p.el.querySelector('#wm') as HTMLCanvasElement; cv.width = map.w; cv.height = map.h;
   renderMini(cv.getContext('2d')!);
   (p.el.querySelector('#wm-close') as HTMLElement).onclick = () => { sfx('click'); p.close(); };
@@ -1024,13 +1248,14 @@ function openWorldMap() {
 
 $('btn-map').addEventListener('click', () => { unlockAudio(); sfx('click'); if (!panelOpen()) openWorldMap(); });
 mmEl.addEventListener('click', () => { unlockAudio(); sfx('click'); if (!panelOpen()) openWorldMap(); });
-$('btn-prep').addEventListener('click', () => { unlockAudio(); sfx('click'); if (scene === 'map' && !panelOpen()) openPrep(); });
+$('btn-prep').addEventListener('click', () => { unlockAudio(); sfx('click'); if (scene !== 'title' && !panelOpen()) openPrep(undefined, false, 'bag'); });
+$('btn-dress').addEventListener('click', () => { unlockAudio(); sfx('click'); if (scene !== 'title' && !panelOpen()) openPrep(undefined, false, 'body'); });
 $('btn-gps').addEventListener('click', () => { unlockAudio(); sfx('click'); gpsOn = !gpsOn; $('btn-gps').classList.toggle('on', gpsOn); toast(gpsOn ? 'เปิดระบบนำทาง' : 'ปิดระบบนำทาง'); });
 
 function openStageSelect() { showTitle(); }
 
 async function goHome() {
-  if (await confirmBox('กลับหน้าหลัก?', 'ความคืบหน้าบันทึกอัตโนมัติแล้ว จะกลับไปที่หน้าหลักเพื่อเลือกเมนู', 'กลับหน้าหลัก', 'เล่นต่อ')) { closeAllPanels(); showTitle(); }
+  if (await confirmBox('กลับลานเมือง?', 'ความคืบหน้าบันทึกอัตโนมัติแล้ว จะวาร์ปกลับไปที่ลานเมืองเกาะสุโขทัย', 'กลับลานเมือง', 'ยกเลิก')) { closeAllPanels(); flushCloud(); void startPlaying(); }
 }
 
 function openMenu() {
@@ -1042,13 +1267,15 @@ function openMenu() {
     `<div class="stat-grid"><span>HP <b>${Math.ceil(hp)}/${s.maxHp}</b></span><span>ทอง <b>${save.gold}</b></span><span>โจมตี <b>${s.atk}</b></span><span>ป้องกัน <b>${s.def}</b></span>` +
     `<span>ดาบ <b>${esc(w.name)}</b></span><span>เกราะ <b>${esc(a.name)}</b></span><span>ตอบถูก <b>${save.stats.correct}/${save.stats.answered}</b></span><span>แม่นยำ <b>${acc}%</b></span></div>` +
     (nextW ? `<div class="unlock">ดาบประจำตัวถัดไป: ${esc(nextW.name)} ที่เลเวล ${nextW.minLevel}</div>` : '') +
-    `<button class="btn gold" id="m-resume">เล่นต่อ</button><button class="btn" id="m-prep">เตรียมตัว / แต่งกาย / อุปกรณ์</button><button class="btn" id="m-stage">เลือกด่าน</button><button class="btn" id="m-home">กลับหน้าหลัก</button><button class="btn alt" id="m-reset">เริ่มเกมใหม่ทั้งหมด</button>`);
+    (Object.keys(save.inv).some(k => ITEMS[k] && save.inv[k] > 0) ? `<div class="unlock">วัตถุดิบ: ${Object.keys(save.inv).filter(k => ITEMS[k] && save.inv[k] > 0).map(k => `${esc(ITEMS[k].name)} ×${save.inv[k]}`).join(' • ')}</div>` : '') +
+    `<button class="btn gold" id="m-resume">เล่นต่อ</button><button class="btn" id="m-prep">เตรียมตัว / แต่งกาย / อุปกรณ์</button><button class="btn" id="m-stage">กลับล็อบบี้</button><button class="btn" id="m-how">วิธีเล่น</button><button class="btn" id="m-home">ออกจากระบบ</button><button class="btn alt" id="m-reset">เริ่มเกมใหม่ทั้งหมด</button>`);
   (p.el.querySelector('#m-resume') as HTMLElement).onclick = () => { sfx('click'); p.close(); };
   (p.el.querySelector('#m-prep') as HTMLElement).onclick = () => { sfx('click'); p.close(); openPrep(); };
   (p.el.querySelector('#m-stage') as HTMLElement).onclick = () => { sfx('click'); p.close(); openStageSelect(); };
-  (p.el.querySelector('#m-home') as HTMLElement).onclick = () => { sfx('click'); p.close(); void goHome(); };
+  (p.el.querySelector('#m-how') as HTMLElement).onclick = () => { sfx('click'); p.close(); openHowTo(); };
+  (p.el.querySelector('#m-home') as HTMLElement).onclick = async () => { sfx('click'); if (await confirmBox('ออกจากระบบ?', 'ความคืบหน้าถูกบันทึกไว้กับบัญชี Google แล้ว', 'ออกจากระบบ', 'ยกเลิก')) { p.close(); flushCloud(); await logout(); } };
   (p.el.querySelector('#m-reset') as HTMLElement).onclick = async () => {
-    if (await confirmBox('เริ่มใหม่?', 'ความคืบหน้าทั้งหมดจะหายไป', 'เริ่มใหม่', 'ยกเลิก')) { p.close(); wipeSave(); save = freshSave(); hp = stats().maxHp; sp = 0; showTitle(); }
+    if (await confirmBox('เริ่มใหม่?', 'ความคืบหน้าทั้งหมดจะหายไป', 'เริ่มใหม่', 'ยกเลิก')) { p.close(); wipeSave(); { const keep = { name: save.name, look: save.look }; save = freshSave(); save.name = keep.name; save.look = keep.look; save.started = true; } hp = stats().maxHp; sp = 0; showTitle(); }
   };
 }
 
@@ -1078,56 +1305,7 @@ function openHowTo() {
   (p.el.querySelector('#how-ok') as HTMLElement).onclick = () => { sfx('click'); p.close(); };
 }
 
-function showTitle() {
-  scene = 'title'; inStage = false;
-  closeAllPanels();
-  $('hud').classList.add('hidden'); $('touch').classList.add('hidden'); $('bossbar').classList.add('hidden'); mmEl.classList.add('hidden'); $('side-btns').classList.add('hidden'); $('objective').classList.add('hidden');
-  setMusic('off');
-  const lobby = $('lobby');
-  const has = save.started;
-  const stageRows = STAGES.map(st => {
-    const prevOk = st.id === 1 || save.cleared.includes(st.id - 1), open = prevOk && save.level >= st.rec;
-    const badge = save.cleared.includes(st.id) ? 'ผ่านแล้ว' : open ? 'เปิด' : !prevOk ? 'ผ่านด่านก่อน' : `ต้อง LV ${st.rec}`;
-    return `<button class="lb-stage ${open ? '' : 'locked'} ${save.cleared.includes(st.id) ? 'done' : ''}" data-id="${st.id}"><b>${st.id}</b><span>${esc(st.name)}<small>${esc(st.sub)} • แนะนำ LV ${st.rec}</small></span><i>${badge}</i></button>`;
-  }).join('');
-  lobby.innerHTML =
-    `<div class="lb-logo"><div class="lb-title">THE FIGHT<br>KING</div><div class="lb-sub">ตำนานอัศวินผู้พิทักษ์ปัญญา</div><div class="lb-tag">ผจญภัย 10 ดินแดน • ฟาร์มเลเวล • เรียนรู้ไปพร้อมกัน</div></div>` +
-    `<div class="lb-menu">` +
-    (has
-      ? `<div class="lb-card"><div class="lb-lv">LV<b>${save.level}</b></div><div class="lb-info"><b>${esc(save.name || 'อัศวินผู้กล้า')}</b><br>ผ่านแล้ว <b>${save.cleared.length}/10</b> ด่าน • ทอง <b>${save.gold}</b><br>${esc(gw().name)} • ${esc(ga().name)}</div></div>` +
-        `<div class="lb-modes"><button class="lb-mode on" id="lbm-story">เนื้อเรื่อง</button><button class="lb-mode soon" id="lbm-cave">ถ้ำ/เหมือง<em>เร็ว ๆ นี้</em></button><button class="lb-mode soon" id="lbm-free">อิสระ<em>เร็ว ๆ นี้</em></button></div>` +
-        `<div class="lb-stages" id="lb-stages">${stageRows}</div>`
-      : `<button class="lb-btn primary" id="lb-start"><span>เริ่มการผจญภัย</span><small>รับพระราชโองการและออกเดินทาง</small></button>`) +
-    `<div class="lb-actions"><button class="lb-act" id="lb-prep"><b>แต่งตัว</b><small>ชุด/อาวุธ/เครื่องราง</small></button><button class="lb-act soon" id="lb-party"><b>ชวนเพื่อน</b><small>ออนไลน์ เร็ว ๆ นี้</small></button><button class="lb-act" id="lb-how"><b>วิธีเล่น</b><small>ปุ่มและเคล็ดลับ</small></button></div>` +
-    `<div class="lb-foot"><button class="lb-mini" id="lb-mute">${isMuted() ? 'เสียง: ปิด' : 'เสียง: เปิด'}</button><button class="lb-mini" id="lb-logout">ออกจากระบบ</button>${has ? '<button class="lb-mini" id="lb-reset">เริ่มเกมใหม่</button>' : ''}</div></div>` +
-    `<div class="lb-tip" id="lb-tip">${TIPS[0]}</div><div class="lb-ver">v0.5 • บันทึกอัตโนมัติ</div>`;
-  lobby.classList.remove('hidden');
-  let ti = 0; clearInterval(tipTimer);
-  tipTimer = window.setInterval(() => { ti = (ti + 1) % TIPS.length; const el = document.getElementById('lb-tip'); if (el) { el.classList.remove('in'); void el.offsetWidth; el.textContent = TIPS[ti]; el.classList.add('in'); } }, 4200);
-
-  const el = (id: string) => lobby.querySelector('#' + id) as HTMLElement | null;
-  const startNew = async () => {
-    const keep = { name: save.name, look: save.look }; save = freshSave(); save.name = keep.name; save.look = keep.look; save.started = true; writeSave(save); hp = stats().maxHp; sp = 0;
-    hideLobby();
-    await dialog('พระราชโองการ', [STORY_INTRO], 'รับบัญชา');
-    showTitle();
-  };
-  const st0 = el('lb-start'); if (st0) st0.onclick = () => { unlockAudio(); sfx('click'); void startNew(); };
-  const lo = el('lb-logout'); if (lo) lo.onclick = async () => { unlockAudio(); sfx('click'); if (await confirmBox('ออกจากระบบ?', 'ความคืบหน้าถูกบันทึกไว้กับบัญชี Google ของคุณแล้ว', 'ออกจากระบบ', 'ยกเลิก')) { flushCloud(); await logout(); } };
-  const rs = el('lb-reset'); if (rs) rs.onclick = async () => { unlockAudio(); sfx('click'); if (await confirmBox('เริ่มใหม่?', 'ความคืบหน้าเดิมจะหายไป', 'เริ่มใหม่', 'ยกเลิก')) { wipeSave(); await startNew(); } };
-  lobby.querySelectorAll<HTMLButtonElement>('.lb-stage').forEach(b => {
-    b.onclick = () => {
-      unlockAudio();
-      const id = +b.dataset.id!, sdef = STAGES[id - 1];
-      if (b.classList.contains('locked')) { sfx('wrong'); toast(save.level < sdef.rec ? `ต้องเลเวล ${sdef.rec} ขึ้นไป` : 'ต้องผ่านด่านก่อนหน้าก่อน'); return; }
-      sfx('click'); hideLobby(); $('hud').classList.remove('hidden'); $('touch').classList.remove('hidden'); void enterStage(id);
-    };
-  });
-  for (const id of ['lbm-cave', 'lbm-free', 'lb-party']) { const b = el(id); if (b) b.onclick = () => { sfx('click'); toast(id === 'lb-party' ? 'โหมดออนไลน์และชวนเพื่อน เร็ว ๆ นี้' : 'โหมดนี้เร็ว ๆ นี้'); }; }
-  el('lb-prep')!.onclick = () => { unlockAudio(); sfx('click'); openPrep(() => showTitle()); };
-  el('lb-how')!.onclick = () => { unlockAudio(); sfx('click'); openHowTo(); };
-  el('lb-mute')!.onclick = () => { unlockAudio(); toggleMute(); el('lb-mute')!.textContent = isMuted() ? 'เสียง: ปิด' : 'เสียง: เปิด'; };
-}
+function showTitle() { void startPlaying(); }
 
 // ================================================================== update: enemies
 function attackersCount() { return enemies.filter(e => !e.dead && !e.boss && (e.st === 'wind' || e.st === 'act')).length; }
@@ -1144,6 +1322,7 @@ function updateEnemy(e: Enemy, dt: number) {
   e.kx *= kdec; e.ky *= kdec;
 
   const dx = P.x - e.x, dy = P.y - e.y, d = Math.hypot(dx, dy) || 1;
+  if (!canFight()) { if (e.st !== 'idle') { e.st = 'idle'; teles = teles.filter(t => t.owner !== e); } e.awake = false; return; }
   const slow = e.slow > 0 ? 0.45 : 1;
   const move = (ax: number, ay: number, spd: number) => {
     const mx = e.x + ax * spd * slow * dt, my = e.y + ay * spd * slow * dt;
@@ -1394,8 +1573,17 @@ function updateWorld(dt: number) {
 
   // ---- enemies
   for (const e of enemies.slice()) if (!e.dead) updateEnemy(e, dt);
+  if (!bossAlive && bossRespawnT > 0) { bossRespawnT -= dt; if (bossRespawnT <= 0) respawnBoss(); }
+  for (const pd of pending) pd.t -= dt;
+  for (let i = pending.length - 1; i >= 0; i--) {
+    const pd = pending[i]; if (pd.t > 0) continue;
+    const alive = enemies.filter(e => !e.boss && !e.dead).length;
+    if (alive >= ENEMY_MAX + 4) { pending.splice(i, 1); continue; }
+    if (dist(pd.x, pd.y, P.x, P.y) < 150 || blockedAt(pd.x, pd.y, 7) || (map.hub && dist(pd.x, pd.y, map.hub.x, map.hub.y) < 400)) { pd.t = 3; continue; }
+    const e = mkEnemy(pd.def, stage.rec + (pd.elite ? 2 : Math.random() < 0.5 ? 0 : 1), false, pd.x, pd.y, pd.elite); e.born = 0.01; enemies.push(e); pending.splice(i, 1);
+  }
   respawnT -= dt;
-  if (respawnT <= 0) { respawnT = 7; if (enemies.filter(e => !e.boss && !e.dead).length < ENEMY_MAX) spawnEnemy(120); }
+  if (respawnT <= 0) { respawnT = 3; if (!stage.town && enemies.filter(e => !e.boss && !e.dead).length < ENEMY_MAX) spawnEnemy(240); }
 
   // ---- projectiles
   for (const p of projs) {
@@ -1437,15 +1625,30 @@ function updateWorld(dt: number) {
     if (o.t > 0.35 && dist(o.x, o.y, P.x, P.y - 8) < 5) { o.t = 99; if (o.gold) sfx('coin'); burst(P.x, P.y - 8, o.gold ? ['#ffd84a'] : ['#7fe0ff'], 3, 30, 10); }
   }
   orbs = orbs.filter(o => o.t < 90);
+  for (const l of loots) {
+    l.t += dt;
+    if (l.t < 0.45) { l.x += l.vx * dt; l.y += l.vy * dt; l.vy += 260 * dt; }
+    else { const d0 = dist(l.x, l.y, P.x, P.y - 6); if (d0 < 48) { const a = Math.atan2(P.y - 6 - l.y, P.x - l.x), spd = 70 + (48 - d0) * 9; l.x += Math.cos(a) * spd * dt; l.y += Math.sin(a) * spd * dt; } }
+    if (l.t > 0.45 && dist(l.x, l.y, P.x, P.y - 6) < 8) {
+      save.inv[l.id] = (save.inv[l.id] ?? 0) + 1; floater(P.x, P.y - 28, `+${ITEMS[l.id].name}`, ITEMS[l.id].color, true);
+      sfx('coin'); burst(P.x, P.y - 8, [ITEMS[l.id].color, '#fff'], 8, 40, 14); l.t = 999; writeSave(save);
+    }
+  }
+  loots = loots.filter(l => l.t < 60);
 
   // ---- NPC proximity
   nearNpc = null; let bd = 26;
   for (const n of npcs) { const d = dist(P.x, P.y, n.x, n.y); if (d < bd) { bd = d; nearNpc = n; } }
   let nearChest: Chest | null = null, cd2 = 20;
   for (const c of chests) if (!c.open) { const d = dist(P.x, P.y, c.x, c.y); if (d < cd2) { cd2 = d; nearChest = c; } }
+  if (shipCall.st === 'coming') { shipCall.t += dt / 3.4; if (shipCall.t >= 1) { shipCall = { st: 'moored', t: 1 }; sfx('equip'); banner('เรือมาถึงแล้ว', ['เดินไปที่ท่าเรือแล้วกด "ขึ้นเรือ"'], 3400); } }
+  const boatAt = map.dock ? (shipCall.st === 'moored' ? map.dock : null) : { x: map.start.x - 10, y: map.start.y + 4 };
+  const nearBoat = !!boatAt && !nearNpc && !nearChest && dist(P.x, P.y, boatAt.x, boatAt.y) < (map.dock ? 44 : 24);
   const actBtn = $('btn-act');
-  actBtn.classList.toggle('hidden', !nearNpc && !nearChest); actBtn.textContent = nearNpc ? 'คุย' : 'เปิด';
-  if (flags.act) { flags.act = false; if (nearNpc) { sfx('click'); void talkNpc(nearNpc); } else if (nearChest) openChest(nearChest); }
+  actBtn.classList.toggle('hidden', !nearNpc && !nearChest && !nearBoat); actBtn.textContent = nearNpc ? 'คุย' : nearChest ? 'เปิด' : map.dock ? 'ขึ้นเรือ' : 'ลงเรือ';
+  if (flags.act) { flags.act = false; if (nearNpc) { sfx('click'); void talkNpc(nearNpc); } else if (nearChest) openChest(nearChest); else if (nearBoat) { sfx('click'); enterSea(stage.id); } }
+
+  updateMultiplayer(dt);
 
   // slow regen out of combat
   const inCombat = enemies.some(e => !e.dead && e.awake && dist(e.x, e.y, P.x, P.y) < 120);
@@ -1585,6 +1788,8 @@ function drawPlayer() {
   if (!(dir === 'up' && !swinging)) drawSword(px, py - bob, swAng, swinging, time);
   // weapon aura at high tiers
   if (weaponIdx() >= 3 && Math.random() < 0.2) parts.push({ x: x + rand(-5, 5), y: y - rand(2, 20), vx: 0, vy: -rand(8, 20), life: 0.7, max: 0.7, c: gw().glow, s: 0.9, g: 0, add: true });
+  drawTag(x, y - 24 - bob, save.name || 'ฉัน', save.level, true);
+  if (myBubble.t > 0) drawBubble(x, y - 31 - bob, myBubble.text, myBubble.t);
 }
 
 function drawWorld() {
@@ -1664,12 +1869,28 @@ function drawWorld() {
       else ctx.drawImage(o.spr, o.x - 10, o.y - 27);
     } });
   }
+  for (const r of remotes.values()) items.push({ y: r.y, draw: () => drawRemote(r) });
+  for (const p of map.props) items.push({ y: p.kind === 'house' ? p.y + 3 * TS : p.kind === 'fountain' ? p.y + 12 : p.y + 6, draw: () => drawProp(p) });
+  if (!map.dock) items.push({ y: map.start.y + 8, draw: () => drawShip(map.start.x - 10, map.start.y + 8, -1, time, { sails: false, rider: false, scale: 0.8 }) });
+  if (map.shipSpot && shipCall.st !== 'none') items.push({ y: map.shipSpot.y + 6, draw: () => {
+    const k = shipCall.st === 'moored' ? 1 : 1 - Math.pow(1 - shipCall.t, 3), sx = map.shipSpot!.x - (1 - k) * 280, sy = map.shipSpot!.y;
+    if (shipCall.st === 'coming') { ctx.fillStyle = 'rgba(255,255,255,.55)'; for (let q = 0; q < 6; q++) ctx.fillRect(sx - 26 - q * 7, sy + 4 + (q % 2), 4, 1); }
+    drawShip(sx, sy, 1, time, { sails: shipCall.st === 'coming', rider: false, scale: 0.9 });
+  } });
   for (const n of npcs) {
-    const done = save.quests[`${stage.id}-${n.idx}`];
+    const nd = stage.npcs[n.idx];
+    const done = nd.quest ? !!save.quest && save.quest.have < save.quest.need : !nd.quiz || save.quests[`${stage.id}-${n.idx}`];
     items.push({ y: n.y, draw: () => {
+      if (stage.town || stage.hub) {
+        ctx.fillStyle = '#5a3818'; ctx.fillRect(n.x - 11, n.y - 24, 2, 17); ctx.fillRect(n.x + 9, n.y - 24, 2, 17);
+        ctx.fillStyle = stage.npcs[n.idx].robe; ctx.fillRect(n.x - 13, n.y - 28, 26, 6);
+        ctx.fillStyle = '#f4ecd8'; for (let k = 0; k < 4; k++) ctx.fillRect(n.x - 13 + k * 7 + 2, n.y - 28, 3, 6);
+        ctx.fillStyle = '#7a5a2a'; ctx.fillRect(n.x - 12, n.y - 6, 24, 3);
+      }
       drawShadow(ctx, n.x, n.y, 5, 2);
       ctx.drawImage(n.spr, n.x - 8, n.y - 15 + Math.sin(time * 2 + n.idx) * 0.3);
-      if (!done) { ctx.fillStyle = '#ffd84a'; ctx.font = 'bold 9px "Pixelify Sans", monospace'; ctx.textAlign = 'center'; ctx.fillText('!', n.x, n.y - 18 + Math.sin(time * 5) * 1.5); }
+      { const nd0 = stage.npcs[n.idx], col = nd0.quest ? '#7cc8ff' : nd0.craft ? '#ffb868' : nd0.harbor ? '#6ee8e8' : nd0.role ? '#d8d0a0' : '#c8e8a8'; drawNpcTag(n.x, n.y - (stage.hub ? 32 : 19), nd0.name, npcRole(nd0), col); }
+      if (!done) { ctx.fillStyle = '#ffd84a'; ctx.font = 'bold 9px "Pixelify Sans", monospace'; ctx.textAlign = 'center'; ctx.fillText('!', n.x, n.y - (stage.hub ? 47 : 34) + Math.sin(time * 5) * 1.5); }
       if (n === nearNpc && touchCapable === false) { ctx.fillStyle = '#fff'; ctx.font = '5px "Pixelify Sans", monospace'; ctx.textAlign = 'center'; ctx.fillText('[E] คุย', n.x, n.y + 8); }
     } });
   }
@@ -1696,6 +1917,11 @@ function drawWorld() {
   for (const d of daggers) { ctx.save(); ctx.translate(d.x, d.y); ctx.rotate(d.a); ctx.globalAlpha = 1; ctx.fillStyle = '#e8f0f8'; ctx.fillRect(-4, -0.7, 8, 1.4); ctx.fillStyle = '#fff'; ctx.fillRect(2, -0.7, 3, 1.4); ctx.restore(); }
   for (const p of parts) if (p.add) { ctx.globalAlpha = clamp(p.life / p.max, 0, 1); ctx.fillStyle = p.c; ctx.fillRect(p.x - p.s / 2, p.y - p.s / 2, p.s, p.s); }
   for (const pr of projs) { ctx.globalAlpha = 1; const g = ctx.createRadialGradient(pr.x, pr.y, 0, pr.x, pr.y, pr.r * 2.4); g.addColorStop(0, '#fff'); g.addColorStop(0.35, pr.c); g.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = g; ctx.fillRect(pr.x - pr.r * 3, pr.y - pr.r * 3, pr.r * 6, pr.r * 6); }
+  for (const l of loots) {
+    const by = l.y + Math.sin(time * 5 + l.x) * 1.2, col = ITEMS[l.id].color;
+    ctx.save(); ctx.globalCompositeOperation = 'lighter'; const gl = ctx.createRadialGradient(l.x, by, 0, l.x, by, 9); gl.addColorStop(0, col + 'aa'); gl.addColorStop(1, col + '00'); ctx.fillStyle = gl; ctx.fillRect(l.x - 9, by - 9, 18, 18); ctx.restore();
+    ctx.fillStyle = '#000'; ctx.fillRect(l.x - 3, by - 3, 6, 6); ctx.fillStyle = col; ctx.fillRect(l.x - 2, by - 2, 4, 4); ctx.fillStyle = '#fff'; ctx.fillRect(l.x - 1, by - 2, 1, 1);
+  }
   for (const o of orbs) { ctx.globalAlpha = 1; ctx.fillStyle = o.gold ? '#ffd84a' : '#7fe0ff'; ctx.fillRect(o.x - 1, o.y - 1, 2, 2); ctx.globalAlpha = 0.4; ctx.fillRect(o.x - 2, o.y - 2, 4, 4); }
   ctx.restore();
   for (const p of parts) if (!p.add) { ctx.globalAlpha = clamp(p.life / p.max, 0, 1); ctx.fillStyle = p.c; ctx.fillRect(p.x - p.s / 2, p.y - p.s / 2, p.s, p.s); }
@@ -1710,9 +1936,9 @@ function drawWorld() {
   // ---- screen space
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   // ambient grade
-  ctx.save(); ctx.globalCompositeOperation = 'multiply'; ctx.fillStyle = AMBIENT[stage.id - 1]; ctx.fillRect(0, 0, W, H); ctx.restore();
+  ctx.save(); ctx.globalCompositeOperation = 'multiply'; ctx.fillStyle = AMBIENT[themeIx(stage.id)]; ctx.fillRect(0, 0, W, H); ctx.restore();
   // weather
-  const wc = WEATHER[stage.id - 1];
+  const wc = WEATHER[themeIx(stage.id)];
   ctx.save(); ctx.globalCompositeOperation = 'lighter';
   for (const p of weather) {
     p.x += (wc.vx * 0.0016 + Math.sin(time + p.ph) * 0.0006) * p.sp; p.y += wc.vy * 0.0016 * p.sp;
@@ -1867,6 +2093,664 @@ document.addEventListener('touchend', e => { const n = Date.now(); if (n - lastT
 document.addEventListener('touchmove', e => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
 document.addEventListener('wheel', e => { if (e.ctrlKey) e.preventDefault(); }, { passive: false });
 
+
+// ================================================================== sea (world 1): floating islands you sail between
+const SEA_W = 300, SEA_H = 210, SC = 2; // tiles; SC = world px per terrain cell (fine coastlines)
+const ISLAND_POS: [number, number][] = [[40, 168], [92, 176], [143, 187], [204, 167], [265, 184], [255, 126], [197, 109], [139, 129], [78, 112], [34, 68], [92, 44], [153, 65], [214, 41], [272, 75], [275, 24]];
+interface SeaIsland { id: number; cx: number; cy: number; R: number; ph: number[]; dock: { x: number; y: number }; ang: number; hut: { x: number; y: number }; }
+interface SeaTree { x: number; y: number; spr: Sprite; }
+interface Sea { img: HTMLCanvasElement; mini: HTMLCanvasElement; land: Uint8Array; gw: number; gh: number; islands: SeaIsland[]; trees: SeaTree[]; }
+let sea: Sea | null = null;
+const ship = { x: 0, y: 0, vx: 0, vy: 0, face: 1, boost: 0, boostCd: 0, wakeT: 0, saveT: 0, hudT: 0, wake: [] as { x: number; y: number; t: number }[] };
+let nearDock: SeaIsland | null = null;
+const clouds = Array.from({ length: 22 }, (_, i) => ({ x: (i * 977) % (SEA_W * TS), y: (i * 613) % (SEA_H * TS), r: 70 + (i % 5) * 28, sp: 6 + (i % 4) * 2.5 }));
+const shoreR = (i: { R: number; ph: number[] }, th: number) =>
+  i.R * (1 + 0.2 * Math.sin(2 * th + i.ph[0]) + 0.14 * Math.sin(3 * th + i.ph[1]) + 0.09 * Math.sin(5 * th + i.ph[2]) + 0.05 * Math.sin(9 * th + i.ph[3]));
+const hexRgb = (hx: string): [number, number, number] => { const n = parseInt(hx.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
+const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+
+function genSea(): Sea {
+  const w = SEA_W, h = SEA_H, gw = w * TS / SC, gh = h * TS / SC, r = seeded(777), CT = TS / SC; // CT = cells per tile
+  const islands: SeaIsland[] = ISLANDS.map((st, i) => {
+    const [cx, cy] = ISLAND_POS[i];
+    return { id: st.id, cx, cy, R: i === 0 ? 15 : 9 + (i % 3) * 1.5 + Math.min(5, i / 3), ph: [r() * 6.28, r() * 6.28, r() * 6.28, r() * 6.28], dock: { x: 0, y: 0 }, ang: 0, hut: { x: 0, y: 0 } };
+  });
+  islands.forEach((isl, i) => {
+    isl.ang = i === 0 ? Math.PI / 2 : Math.atan2(islands[i - 1].cy - isl.cy, islands[i - 1].cx - isl.cx);
+    const rr = shoreR(isl, isl.ang) + 3;
+    isl.dock = { x: (isl.cx + Math.cos(isl.ang) * rr) * TS, y: (isl.cy + Math.sin(isl.ang) * rr) * TS };
+    isl.hut = { x: isl.dock.x - Math.cos(isl.ang) * 62 + Math.sin(isl.ang) * 22, y: isl.dock.y - Math.sin(isl.ang) * 62 - Math.cos(isl.ang) * 22 };
+  });
+  const E = new Float32Array(gw * gh).fill(99), BI = new Uint8Array(gw * gh), Hh = new Float32Array(gw * gh), land = new Uint8Array(gw * gh);
+  const nzA = valueNoise(gw, gh, 70, 5), nzB = valueNoise(gw, gh, 26, 6), nzC = valueNoise(gw, gh, 12, 8), nzD = valueNoise(gw, gh, 5, 9);
+  // pass 1: signed distance to the nearest coast (tiles), ragged by noise
+  islands.forEach((isl, k) => {
+    const lim = isl.R * 1.55 + 14;
+    const x0 = Math.max(0, Math.floor((isl.cx - lim) * CT)), x1 = Math.min(gw - 1, Math.ceil((isl.cx + lim) * CT));
+    const y0 = Math.max(0, Math.floor((isl.cy - lim) * CT)), y1 = Math.min(gh - 1, Math.ceil((isl.cy + lim) * CT));
+    for (let cy = y0; cy <= y1; cy++) for (let cx = x0; cx <= x1; cx++) {
+      const u = (cx + 0.5) / CT, v = (cy + 0.5) / CT, dx = u - isl.cx, dy = v - isl.cy;
+      const e = Math.hypot(dx, dy) - shoreR(isl, Math.atan2(dy, dx)) + (nzD(cx, cy) - 0.5) * 1.4;
+      const i = cy * gw + cx;
+      if (e < E[i]) { E[i] = e; BI[i] = k; }
+    }
+  });
+  // heights (land only): inland depth + hills + a peak per island
+  for (let cy = 0; cy < gh; cy++) for (let cx = 0; cx < gw; cx++) {
+    const i = cy * gw + cx;
+    if (E[i] >= 0) continue;
+    land[i] = 1;
+    const isl = islands[BI[i]], u = (cx + 0.5) / CT, v = (cy + 0.5) / CT;
+    const px = isl.cx + Math.cos(isl.ph[0]) * isl.R * 0.25, py = isl.cy + Math.sin(isl.ph[1]) * isl.R * 0.25;
+    const bump = Math.max(0, 1 - Math.hypot(u - px, v - py) / (isl.R * 0.62)) * isl.R * 0.6;
+    Hh[i] = -E[i] * 0.85 + (nzA(cx, cy) - 0.5) * 6 + (nzB(cx, cy) - 0.5) * 2.4 + bump;
+  }
+  // pass 2: colour
+  const img = document.createElement('canvas'); img.width = gw; img.height = gh;
+  const g = img.getContext('2d')!; const id = g.createImageData(gw, gh), px = id.data;
+  const WATER: [number, [number, number, number]][] = [[0, [150, 238, 244]], [0.08, [102, 216, 250]], [0.3, [58, 172, 242]], [0.7, [36, 138, 228]], [1, [26, 114, 208]]];
+  const waterCol = (d: number): [number, number, number] => {
+    for (let k = 1; k < WATER.length; k++) if (d <= WATER[k][0]) { const [d0, c0] = WATER[k - 1], [d1, c1] = WATER[k], f = (d - d0) / (d1 - d0); return [c0[0] + (c1[0] - c0[0]) * f, c0[1] + (c1[1] - c0[1]) * f, c0[2] + (c1[2] - c0[2]) * f]; }
+    return WATER[WATER.length - 1][1];
+  };
+  const themeCols = islands.map((_, k) => { const t = ISLANDS[k].theme; return { g1: hexRgb(t.g1), g2: hexRgb(t.g2), oc: hexRgb(t.oc) }; });
+  const mix = (a: number[], b: number[], f: number): [number, number, number] => [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f];
+  for (let cy = 0; cy < gh; cy++) for (let cx = 0; cx < gw; cx++) {
+    const i = cy * gw + cx, e = E[i], bay = BAYER[(cy & 3) * 4 + (cx & 3)] / 16 - 0.5, sp = (nzD((cx * 13) % gw, (cy * 7) % gh) - 0.5) * 7;
+    let c: [number, number, number];
+    if (e >= 0) {
+      c = waterCol(Math.min(1, e / 14));
+      c = [c[0] + sp * 0.6, c[1] + sp * 0.6, c[2] + sp * 0.6];
+      const foam = 1 - e / 0.8;
+      if (e < 0.8 && foam > bay + 0.55 * (nzC(cx, cy) - 0.5) + 0.35) c = [240, 252, 255];
+      else if (e > 1.5 && e < 2.2 && (nzC((cx + 9) % gw, cy) > 0.62) && bay > 0.1) c = mix(c, [210, 240, 250], 0.5);
+    } else {
+      const k = BI[i], th = themeCols[k], isl = islands[k], d = -e, hh = Hh[i];
+      if (d < 0.9) c = [196, 178, 130];
+      else if (d < 2.8 + (nzC(cx, cy) - 0.5) * 1.6) c = mix([236, 220, 168], [226, 208, 152], (d - 0.9) / 1.9);
+      else {
+        const t = hh / (isl.R * 0.9);
+        const base = mix(th.g1, th.g2, nzC(cx, cy) > 0.5 ? 0.85 : 0.1);
+        if (t < 0.5) c = base;
+        else if (t < 0.85) c = mix(base, [base[0] * 0.62, base[1] * 0.7, base[2] * 0.62], Math.min(1, (t - 0.5) / 0.15));
+        else if (t < 1.15 || isl.R < 11) c = mix([126, 118, 106], th.oc, 0.35 + (nzC(cx, cy) - 0.5) * 0.4);
+        else c = [236, 240, 244];
+        // relief shading (light from north-west)
+        const ia = Math.max(0, cy - 1) * gw + Math.max(0, cx - 1), ib = Math.min(gh - 1, cy + 1) * gw + Math.min(gw - 1, cx + 1);
+        const sh = Math.max(-18, Math.min(18, (Hh[ia] - Hh[ib]) * 4.2));
+        c = [c[0] + sh + sp, c[1] + sh + sp, c[2] + sh + sp];
+      }
+    }
+    const o = i * 4; px[o] = Math.max(0, Math.min(255, Math.round(c[0] / 5 + bay * 0.8) * 5)); px[o + 1] = Math.max(0, Math.min(255, Math.round(c[1] / 5 + bay * 0.8) * 5)); px[o + 2] = Math.max(0, Math.min(255, Math.round(c[2] / 5 + bay * 0.8) * 5)); px[o + 3] = 255;
+  }
+  g.putImageData(id, 0, 0);
+  // minimap (1px per tile)
+  const mini = document.createElement('canvas'); mini.width = w; mini.height = h;
+  const m = mini.getContext('2d')!;
+  for (let ty = 0; ty < h; ty++) for (let tx = 0; tx < w; tx++) {
+    const i = Math.floor((ty + 0.5) * CT) * gw + Math.floor((tx + 0.5) * CT), e = E[i];
+    if (e >= 0) { const c = waterCol(Math.min(1, e / 14)); m.fillStyle = `rgb(${c[0] | 0},${c[1] | 0},${c[2] | 0})`; }
+    else { const t = themeCols[BI[i]]; m.fillStyle = e > -1.6 ? '#e6d6a0' : Hh[i] / (islands[BI[i]].R * 0.9) > 0.85 ? '#8a8272' : `rgb(${t.g1[0] | 0},${t.g1[1] | 0},${t.g1[2] | 0})`; }
+    m.fillRect(tx, ty, 1, 1);
+  }
+  // trees and rocks
+  const sprites = islands.map((_, k) => [0, 1, 2].map(v => obstacleSprite(ISLANDS[k].theme.obs, ISLANDS[k].theme.oc, v)));
+  const rocks = [0, 1, 2].map(v => obstacleSprite('rock', '#8a8070', v));
+  const trees: SeaTree[] = [];
+  for (let ty = 2; ty < h - 2; ty++) for (let tx = 2; tx < w - 2; tx++) {
+    const i = Math.floor((ty + 0.5) * CT) * gw + Math.floor((tx + 0.5) * CT);
+    if (!land[i] || -E[i] < 3.4) continue;
+    const k = BI[i], isl = islands[k], t = Hh[i] / (isl.R * 0.9);
+    const wx = tx * TS + 4 + r() * 8, wy = ty * TS + 12 + r() * 3;
+    if (Math.hypot(wx - isl.dock.x, wy - isl.dock.y) < 80 || Math.hypot(wx - isl.hut.x, wy - isl.hut.y) < 26) continue;
+    const dens = t < 0.15 ? 0.04 : t < 0.5 ? 0.09 : t < 0.85 ? 0.34 : 0.07;
+    if (r() > dens) continue;
+    trees.push({ x: wx, y: wy, spr: t >= 0.85 ? rocks[(tx + ty) % 3] : sprites[k][(tx * 3 + ty) % 3] });
+  }
+  trees.sort((a, b) => a.y - b.y);
+  return { img, mini, land, gw, gh, islands, trees };
+}
+
+function seaBlocked(x: number, y: number) {
+  const s = sea!;
+  for (const [ox, oy] of [[0, 0], [6, 0], [-6, 0], [0, 4], [0, -4]]) {
+    const cx = Math.floor((x + ox) / SC), cy = Math.floor((y + oy) / SC);
+    if (cx < 8 || cy < 8 || cx >= s.gw - 8 || cy >= s.gh - 8 || s.land[cy * s.gw + cx]) return true;
+  }
+  return false;
+}
+
+function enterSea(fromIsland: number | null = null) {
+  closeAllPanels();
+  if (!sea) sea = genSea();
+  const s = sea;
+  scene = 'sea'; inStage = false;
+  const idx = fromIsland !== null ? Math.max(0, islandIndex(fromIsland)) : 0;
+  if (fromIsland !== null || !(save.sea.x > 0)) { ship.x = s.islands[idx].dock.x; ship.y = s.islands[idx].dock.y; }
+  else { ship.x = save.sea.x; ship.y = save.sea.y; }
+  if (seaBlocked(ship.x, ship.y)) { ship.x = s.islands[idx].dock.x; ship.y = s.islands[idx].dock.y; }
+  ship.vx = ship.vy = 0; ship.boost = 0; ship.boostCd = 0; ship.wake = []; ship.hudT = 0; navT = 0; navFor = -9; navAuto = { key: '', id: 0 };
+  leaveIslandRoom(); closeChat(); $('chatlog').classList.add('hidden');
+  save.loc = { kind: 'sea', id: 0 }; save.sea = { x: ship.x, y: ship.y, a: 0 }; writeSave(save);
+  cam.x = ship.x - W / Math.max(2, Z - 1) / 2; cam.y = ship.y - H / Math.max(2, Z - 1) / 2;
+  enemies = []; parts = []; rings = []; slashes = []; bolts = []; floaters = []; orbs = []; projs = []; teles = []; daggers = []; puddles = []; waves = [];
+  $('hud').classList.remove('hidden'); $('touch').classList.remove('hidden'); $('touch').classList.add('sea'); $('btn-dodge').textContent = 'เร่ง';
+  $('bossbar').classList.add('hidden'); $('side-btns').classList.remove('hidden'); $('btn-act').classList.add('hidden');
+  mmEl.width = SEA_W; mmEl.height = SEA_H; mmEl.classList.remove('hidden');
+  weather = [];
+  setMusic('map', 0);
+  refreshHud();
+  toast('ล่องเรือ: เข้าใกล้ท่าเรือของเกาะแล้วกด "ขึ้นเกาะ"');
+}
+
+let navAuto = { key: '', id: 0 };
+function navTarget(): SeaIsland {
+  const s = sea!;
+  if (save.nav) { const t = s.islands.find(i => i.id === save.nav - 1); if (t) return t; }
+  const unlocked = s.islands.filter(i => getStage(i.id).rec <= save.level);
+  const key = (canFight() ? 'farm' : 'quest') + save.level;
+  if (navAuto.key !== key || !s.islands.some(i => i.id === navAuto.id)) {
+    const pick = canFight()
+      ? unlocked[unlocked.length - 1]
+      : unlocked.reduce((bst, i) => dist(ship.x, ship.y, i.dock.x, i.dock.y) < dist(ship.x, ship.y, bst.dock.x, bst.dock.y) ? i : bst, unlocked[0]);
+    navAuto = { key, id: pick.id };
+  }
+  return s.islands.find(i => i.id === navAuto.id)!;
+}
+
+// ---- GPS route over open water (grid path-finding around the islands)
+const NGC = 8;
+let navW = 0, navH = 0, navBlock: Uint8Array | null = null, navField: Uint16Array | null = null, navFor = -9, navPts: { x: number; y: number }[] = [], navT = 0;
+function navInit() {
+  const s = sea!, per = NGC / SC;
+  navW = Math.ceil(SEA_W * TS / NGC); navH = Math.ceil(SEA_H * TS / NGC);
+  const raw = new Uint8Array(navW * navH);
+  for (let y = 0; y < navH; y++) for (let x = 0; x < navW; x++) {
+    let land = x < 2 || y < 2 || x >= navW - 2 || y >= navH - 2;
+    for (let j = 0; j < per && !land; j++) for (let k = 0; k < per; k++) { const cx = x * per + k, cy = y * per + j; if (cx < s.gw && cy < s.gh && s.land[cy * s.gw + cx]) { land = true; break; } }
+    raw[y * navW + x] = land ? 1 : 0;
+  }
+  navBlock = new Uint8Array(navW * navH);
+  for (let y = 0; y < navH; y++) for (let x = 0; x < navW; x++) {
+    let bl = 0;
+    for (let j = -1; j <= 1 && !bl; j++) for (let k = -1; k <= 1; k++) { const nx = x + k, ny = y + j; if (nx < 0 || ny < 0 || nx >= navW || ny >= navH || raw[ny * navW + nx]) { bl = 1; break; } }
+    navBlock[y * navW + x] = bl;
+  }
+}
+function navFree(cx: number, cy: number, maxR = 8): [number, number] | null {
+  const bl = navBlock!;
+  for (let r = 0; r <= maxR; r++) for (let j = -r; j <= r; j++) for (let k = -r; k <= r; k++) {
+    if (Math.max(Math.abs(j), Math.abs(k)) !== r) continue;
+    const x = cx + k, y = cy + j; if (x >= 0 && y >= 0 && x < navW && y < navH && !bl[y * navW + x]) return [x, y];
+  }
+  return null;
+}
+function navBuild(targetId: number) {
+  if (!navBlock) navInit();
+  const tg = sea!.islands.find(i => i.id === targetId)!, bl = navBlock!;
+  const start = navFree(Math.floor(tg.dock.x / NGC), Math.floor(tg.dock.y / NGC), 10);
+  navFor = targetId; navField = new Uint16Array(navW * navH).fill(65535);
+  if (!start) return;
+  const f = navField, q = new Int32Array(navW * navH); let qh = 0, qt = 0;
+  f[start[1] * navW + start[0]] = 0; q[qt++] = start[1] * navW + start[0];
+  while (qh < qt) {
+    const c = q[qh++], cx = c % navW, cy = (c / navW) | 0, cv = f[c];
+    for (let j = -1; j <= 1; j++) for (let k = -1; k <= 1; k++) {
+      if (!j && !k) continue;
+      const nx = cx + k, ny = cy + j; if (nx < 0 || ny < 0 || nx >= navW || ny >= navH) continue;
+      const ni = ny * navW + nx; if (bl[ni] || f[ni] !== 65535) continue;
+      if (j && k && (bl[cy * navW + nx] || bl[ny * navW + cx])) continue;
+      f[ni] = cv + 1; q[qt++] = ni;
+    }
+  }
+}
+function navRoute() {
+  const f = navField; navPts = [];
+  if (!f) return;
+  const start = navFree(Math.floor(ship.x / NGC), Math.floor(ship.y / NGC), 8);
+  if (!start) return;
+  let cx = start[0], cy = start[1], guard = 0; const pts: { x: number; y: number }[] = [];
+  while (guard++ < 4000) {
+    pts.push({ x: cx * NGC + NGC / 2, y: cy * NGC + NGC / 2 });
+    const cv = f[cy * navW + cx]; if (cv === 0 || cv === 65535) break;
+    let best = cv, bx = cx, by = cy;
+    for (let j = -1; j <= 1; j++) for (let k = -1; k <= 1; k++) {
+      if (!j && !k) continue;
+      const nx = cx + k, ny = cy + j; if (nx < 0 || ny < 0 || nx >= navW || ny >= navH) continue;
+      const v = f[ny * navW + nx]; if (v < best) { best = v; bx = nx; by = ny; }
+    }
+    if (bx === cx && by === cy) break;
+    cx = bx; cy = by;
+  }
+  const out: { x: number; y: number }[] = [{ x: ship.x, y: ship.y }];
+  for (let i = 2; i < pts.length - 1; i += 3) out.push(pts[i]);
+  const tg = sea!.islands.find(i => i.id === navFor);
+  if (tg) out.push({ x: tg.dock.x, y: tg.dock.y });
+  navPts = out;
+}
+
+function boardIsland(isl: SeaIsland) {
+  const st = getStage(isl.id);
+  if (save.level < st.rec) { sfx('wrong'); toast(`ต้องเลเวล ${st.rec} ก่อนขึ้นเกาะ ${st.name}`); return; }
+  sfx('click');
+  if (save.nav - 1 === isl.id) save.nav = 0;
+  navAuto = { key: '', id: 0 };
+  save.sea = { x: ship.x, y: ship.y, a: 0 }; writeSave(save);
+  hideLobby();
+  arriveFromSea = true;
+  void enterStage(st.id);
+}
+
+function updateSea(dt: number) {
+  const s = sea!;
+  ship.boost = Math.max(0, ship.boost - dt); ship.boostCd = Math.max(0, ship.boostCd - dt);
+  let mx = stick.x, my = stick.y;
+  if (keys.has('arrowleft') || keys.has('a')) mx -= 1;
+  if (keys.has('arrowright') || keys.has('d')) mx += 1;
+  if (keys.has('arrowup') || keys.has('w')) my -= 1;
+  if (keys.has('arrowdown') || keys.has('s')) my += 1;
+  const m = Math.hypot(mx, my); if (m > 1) { mx /= m; my /= m; }
+  if (flags.dodge && ship.boostCd <= 0) { ship.boost = 1.4; ship.boostCd = 4; sfx('dodge'); }
+  flags.dodge = false; flags.atk = false; flags.skill = false; flags.s1 = flags.s2 = flags.s3 = false;
+  const spd = ship.boost > 0 ? 200 : 115, k = Math.min(1, dt * 3);
+  ship.vx += (mx * spd - ship.vx) * k; ship.vy += (my * spd - ship.vy) * k;
+  if (Math.abs(ship.vx) > 4) ship.face = Math.sign(ship.vx);
+  const nx = ship.x + ship.vx * dt, ny = ship.y + ship.vy * dt;
+  if (!seaBlocked(nx, ship.y)) ship.x = nx; else ship.vx *= -0.2;
+  if (!seaBlocked(ship.x, ny)) ship.y = ny; else ship.vy *= -0.2;
+  ship.wakeT -= dt;
+  if (ship.wakeT <= 0 && Math.hypot(ship.vx, ship.vy) > 20) { ship.wakeT = 0.07; ship.wake.push({ x: ship.x - Math.sign(ship.vx || 1) * 8, y: ship.y + 4, t: 0.9 }); }
+  ship.wake = ship.wake.filter(p => (p.t -= dt) > 0);
+  hp = Math.min(stats().maxHp, hp + stats().maxHp * 0.04 * dt);
+
+  nearDock = null; let bd = 34;
+  for (const isl of s.islands) { const d = dist(ship.x, ship.y, isl.dock.x, isl.dock.y); if (d < bd) { bd = d; nearDock = isl; } }
+  const actBtn = $('btn-act');
+  actBtn.classList.toggle('hidden', !nearDock); actBtn.textContent = 'ขึ้นเกาะ';
+  if (flags.act) { flags.act = false; if (nearDock) boardIsland(nearDock); }
+
+  ship.saveT -= dt;
+  if (ship.saveT <= 0) { ship.saveT = 5; save.sea = { x: ship.x, y: ship.y, a: 0 }; writeSave(save); }
+  navT -= dt;
+  if (navT <= 0) { navT = 0.3; const tg0 = navTarget(); if (navFor !== tg0.id) navBuild(tg0.id); navRoute(); }
+  ship.hudT -= dt;
+  if (ship.hudT <= 0) {
+    ship.hudT = 0.25;
+    const t = navTarget(), st = getStage(t.id), d = Math.round(dist(ship.x, ship.y, t.dock.x, t.dock.y) / TS);
+    const o = $('objective'); o.classList.remove('hidden'); o.dataset.kind = save.level >= st.rec ? 'grind' : 'boss';
+    const why = save.nav ? 'ล่องเรือไป' : !save.quest ? 'ไปรับภารกิจที่' : canFight() ? 'ไปฟาร์มที่' : 'ไปรับรางวัลภารกิจที่';
+    $('obj-text').textContent = save.level >= st.rec ? `${why} ${st.name}` : `${st.name} (ต้องเลเวล ${st.rec})`;
+    $('obj-dist').textContent = `ห่างอีกประมาณ ${d} ช่อง`;
+    refreshHud();
+  }
+}
+
+function drawProp(p: Prop) {
+  if (p.kind === 'house') {
+    const x = Math.round(p.x), y = Math.round(p.y), w = 4 * TS, bh = 3 * TS;
+    const roofC = ['#b8412c', '#3f7a9a', '#6a8a3a'][p.v % 3], wallC = ['#e8dab0', '#e0e4d0', '#f0e0c0'][p.v % 3];
+    ctx.fillStyle = 'rgba(0,0,0,.22)'; ctx.fillRect(x + 2, y + bh - 3, w, 5);
+    ctx.fillStyle = wallC; ctx.fillRect(x + 4, y + 14, w - 8, bh - 14);
+    ctx.fillStyle = 'rgba(0,0,0,.14)'; ctx.fillRect(x + 4, y + bh - 6, w - 8, 6);
+    ctx.fillStyle = '#7a5a2c'; ctx.fillRect(x + 4, y + 14, 2, bh - 14); ctx.fillRect(x + w - 6, y + 14, 2, bh - 14); ctx.fillRect(x + 4, y + 26, w - 8, 2);
+    ctx.fillStyle = '#5a3818'; ctx.fillRect(x + w / 2 - 5, y + bh - 20, 10, 20); ctx.fillStyle = '#ffd84a'; ctx.fillRect(x + w / 2 + 2, y + bh - 11, 2, 2);
+    for (const wx of [x + 12, x + w - 22]) {
+      ctx.fillStyle = '#4a3418'; ctx.fillRect(wx - 1, y + 30, 12, 12); ctx.fillStyle = '#9ad0f0'; ctx.fillRect(wx, y + 31, 10, 10);
+      ctx.fillStyle = '#fff'; ctx.fillRect(wx + 1, y + 32, 3, 3); ctx.fillStyle = '#4a3418'; ctx.fillRect(wx + 4, y + 31, 1, 10);
+    }
+    ctx.fillStyle = roofC; ctx.beginPath(); ctx.moveTo(x - 4, y + 20); ctx.lineTo(x + w / 2, y - 10); ctx.lineTo(x + w + 4, y + 20); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(0,0,0,.2)'; ctx.beginPath(); ctx.moveTo(x + w / 2, y - 10); ctx.lineTo(x + w + 4, y + 20); ctx.lineTo(x + w / 2, y + 20); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.fillRect(x - 4, y + 19, w + 8, 2);
+    ctx.fillStyle = '#7a6a5a'; ctx.fillRect(x + w - 18, y - 2, 6, 12);
+    for (let k = 0; k < 3; k++) { const tt = (time * 0.5 + k / 3) % 1; ctx.globalAlpha = (1 - tt) * 0.5; ctx.fillStyle = '#f0f0f0'; ctx.fillRect(x + w - 17 + Math.sin(tt * 6 + k) * 3, y - 5 - tt * 24, 4 + tt * 3, 4 + tt * 3); }
+    ctx.globalAlpha = 1;
+  } else if (p.kind === 'fountain') {
+    const fk = p.v === 1 ? 1.6 : 1; ctx.save(); ctx.translate(p.x, p.y); ctx.scale(fk, fk); const cx = 0, cy = 0;
+    ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.ellipse(cx, cy + 10, 21, 8, 0, 0, 6.3); ctx.fill();
+    ctx.fillStyle = '#9a9aa8'; ctx.beginPath(); ctx.ellipse(cx, cy + 5, 19, 10, 0, 0, 6.3); ctx.fill();
+    ctx.fillStyle = '#c4c4d0'; ctx.beginPath(); ctx.ellipse(cx, cy + 3, 19, 9.5, 0, 0, 6.3); ctx.fill();
+    ctx.fillStyle = '#5cc0ee'; ctx.beginPath(); ctx.ellipse(cx, cy + 4, 15, 7, 0, 0, 6.3); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,.4)'; ctx.fillRect(cx - 9 + ((time * 8) % 14), cy + 3, 4, 1);
+    ctx.fillStyle = '#b0b0be'; ctx.fillRect(cx - 2, cy - 14, 4, 18); ctx.fillStyle = '#d4d4de'; ctx.fillRect(cx - 5, cy - 16, 10, 3);
+    for (let k = 0; k < 8; k++) {
+      const a = k * 0.785, tt = (time * 1.3 + k * 0.125) % 1, rr = tt * 11;
+      ctx.fillStyle = 'rgba(210,240,255,.85)'; ctx.fillRect(Math.round(cx + Math.cos(a) * rr), Math.round(cy - 14 - Math.sin(Math.PI * tt) * 9 + tt * 14), 1.5, 1.5);
+    }
+    ctx.restore();
+  } else if (p.kind === 'lamp') {
+    const x = Math.round(p.x), y = Math.round(p.y);
+    ctx.fillStyle = 'rgba(0,0,0,.2)'; ctx.fillRect(x - 3, y - 1, 8, 2);
+    ctx.fillStyle = '#2a1c10'; ctx.fillRect(x - 1, y - 20, 2, 20); ctx.fillStyle = '#3a2a1c'; ctx.fillRect(x - 3, y - 24, 6, 5);
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    const gr = ctx.createRadialGradient(x, y - 21, 1, x, y - 21, 30 + Math.sin(time * 5 + x) * 1.5); gr.addColorStop(0, 'rgba(255,200,110,.32)'); gr.addColorStop(1, 'rgba(255,200,110,0)');
+    ctx.fillStyle = gr; ctx.fillRect(x - 34, y - 56, 68, 68); ctx.restore();
+    ctx.fillStyle = '#ffe08a'; ctx.fillRect(x - 2, y - 23, 4, 3);
+  } else if (p.kind === 'bench') {
+    const x = Math.round(p.x), y = Math.round(p.y);
+    ctx.fillStyle = 'rgba(0,0,0,.2)'; ctx.fillRect(x - 9, y - 1, 19, 3);
+    ctx.fillStyle = '#6a4420'; ctx.fillRect(x - 8, y - 5, 2, 5); ctx.fillRect(x + 6, y - 5, 2, 5);
+    ctx.fillStyle = '#a8743a'; ctx.fillRect(x - 9, y - 7, 18, 3); ctx.fillStyle = '#8a5a2c'; ctx.fillRect(x - 9, y - 11, 18, 2);
+  } else if (p.kind === 'flowerbed') {
+    const x = Math.round(p.x), y = Math.round(p.y), cols = ['#ff6a8a', '#ffd84a', '#ffffff', '#b890f0', '#ff9a4a'];
+    ctx.fillStyle = 'rgba(0,0,0,.18)'; ctx.fillRect(x - 9, y - 1, 19, 3);
+    ctx.fillStyle = '#9a9aa8'; ctx.fillRect(x - 9, y - 7, 18, 7); ctx.fillStyle = '#5a3c20'; ctx.fillRect(x - 8, y - 6, 16, 5);
+    for (let k = 0; k < 7; k++) { const fx = x - 7 + k * 2.4, sw = Math.sin(time * 2 + k + p.v) * 0.6; ctx.fillStyle = '#3f8a3a'; ctx.fillRect(fx, y - 8 + sw * 0.3, 1, 3); ctx.fillStyle = cols[(k + p.v) % 5]; ctx.fillRect(fx - 0.5 + sw, y - 10, 2, 2); }
+  } else if (p.kind === 'banner') {
+    const x = Math.round(p.x), y = Math.round(p.y), c = p.v ? '#c23a2a' : '#2a6aa8';
+    ctx.fillStyle = '#3a2410'; ctx.fillRect(x - 1, y - 28, 2, 28); ctx.fillRect(x - 1, y - 30, 12, 2);
+    for (let k = 0; k < 14; k++) { ctx.fillStyle = k % 5 === 0 ? '#ffd84a' : c; ctx.fillRect(x + 1 + Math.sin(time * 3 + k * 0.4) * 1.2, y - 28 + k, 8, 1); }
+  } else if (p.kind === 'sign') {
+    const x = Math.round(p.x), y = Math.round(p.y);
+    ctx.fillStyle = 'rgba(0,0,0,.2)'; ctx.fillRect(x - 24, y - 1, 48, 3);
+    ctx.fillStyle = '#4a2a10'; ctx.fillRect(x - 20, y - 18, 3, 18); ctx.fillRect(x + 17, y - 18, 3, 18);
+    ctx.fillStyle = '#a8743a'; ctx.fillRect(x - 24, y - 30, 48, 14); ctx.fillStyle = '#c8945a'; ctx.fillRect(x - 24, y - 30, 48, 2);
+    ctx.fillStyle = '#3a2410'; ctx.font = 'bold 6px "Pixelify Sans", "Mitr", sans-serif'; ctx.textAlign = 'center'; ctx.fillText('เกาะสุโขทัย', x, y - 24); ctx.fillText('ยินดีต้อนรับ', x, y - 18);
+  } else if (p.kind === 'pier') {
+    const x = Math.round(p.x), y = Math.round(p.y), len = 6 * TS;
+    ctx.fillStyle = 'rgba(0,30,70,.28)'; ctx.fillRect(x + 4, y + 8, 3 * TS, len);
+    ctx.fillStyle = '#9a6a34'; ctx.fillRect(x, y, 3 * TS, len);
+    ctx.fillStyle = '#6a4420'; for (let k = 0; k < len; k += 6) ctx.fillRect(x, y + k, 3 * TS, 1);
+    ctx.fillStyle = '#7a4e24'; ctx.fillRect(x, y, 2, len); ctx.fillRect(x + 3 * TS - 2, y, 2, len);
+    ctx.fillStyle = '#3a2410'; for (let k = 6; k < len; k += 24) { ctx.fillRect(x - 2, y + k, 4, 5); ctx.fillRect(x + 3 * TS - 2, y + k, 4, 5); }
+    ctx.fillStyle = '#c8a050'; ctx.fillRect(x + 3 * TS - 3, y + len - 6, 5, 5);
+  } else if (p.kind === 'crate') {
+    const x = Math.round(p.x), y = Math.round(p.y);
+    ctx.fillStyle = 'rgba(0,0,0,.2)'; ctx.fillRect(x - 5, y - 1, 12, 3);
+    ctx.fillStyle = p.v ? '#8a5a2c' : '#9a6a34'; ctx.fillRect(x - 5, y - 9, 10, 9); ctx.fillStyle = '#6a4420'; ctx.fillRect(x - 5, y - 9, 10, 1); ctx.fillRect(x - 5, y - 1, 10, 1); ctx.fillRect(x - 1, y - 9, 2, 9);
+  } else {
+    const x = Math.round(p.x), y = Math.round(p.y);
+    ctx.fillStyle = 'rgba(0,0,0,.2)'; ctx.fillRect(x - 8, y - 1, 16, 3);
+    ctx.fillStyle = '#3a3a44'; ctx.fillRect(x - 4, y - 5, 8, 5); ctx.fillStyle = '#5a5a66'; ctx.fillRect(x - 7, y - 9, 14, 4); ctx.fillRect(x + 6, y - 8, 4, 2);
+    const fl = 120 + Math.sin(time * 12) * 40;
+    ctx.fillStyle = `rgba(255,${fl | 0},40,.95)`; ctx.fillRect(x + 11, y - 7, 4, 6); ctx.fillStyle = '#ffd84a'; ctx.fillRect(x + 12, y - 5, 2, 3);
+  }
+}
+
+function drawShip(x: number, y: number, face: number, t: number, o: { sails: boolean; rider: boolean; vx?: number; scale?: number }) {
+  const sc = o.scale ?? 1, roll = Math.sin(t * 1.7) * 0.025 + (o.vx ?? 0) * 0.0004;
+  ctx.save(); ctx.translate(Math.round(x), Math.round(y + Math.sin(t * 2.4) * 0.9)); ctx.scale(face * sc, sc); ctx.rotate(roll);
+  const R = (px: number, py: number, w: number, h: number, c: string) => { ctx.fillStyle = c; ctx.fillRect(px, py, w, h); };
+  // water contact
+  ctx.fillStyle = 'rgba(0,40,90,.28)'; ctx.beginPath(); ctx.ellipse(0, 5, 27, 5, 0, 0, 6.3); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,.5)'; ctx.beginPath(); ctx.ellipse(1, 3.5, 25, 3.6, 0, 0, 6.3); ctx.fill();
+  // hull (planked rows, bow to the right)
+  const rows: [number, number, number][] = [[-7, -19, 43], [-6, -20, 46], [-5, -20, 48], [-4, -19, 48], [-3, -18, 46], [-2, -17, 43], [-1, -15, 39], [0, -13, 34], [1, -10, 28]];
+  rows.forEach(([ry, rx, rw], k) => R(rx, ry, rw, 1, k < 2 ? '#b07a40' : k % 2 ? '#7a4a22' : '#8a5a2c'));
+  R(-18, -5, 44, 1, '#4a2a10'); R(-14, -1, 36, 1, '#4a2a10'); R(-9, 1, 24, 1, '#3a2010');
+  R(-19, -9, 43, 2, '#c08a4c'); for (let p = -17; p < 23; p += 7) R(p, -11, 2, 3, '#8a5a2c');
+  R(24, -8, 3, 2, '#c08a4c'); R(27, -9, 8, 1.5, '#7a4a22'); R(33, -11, 3, 3, '#ffd84a'); R(35, -10, 2, 1.5, '#e0b030');
+  R(-4, -4, 3, 2, '#1c1008'); R(7, -4, 3, 2, '#1c1008'); R(16, -4, 3, 2, '#1c1008');
+  R(-20, -6, 2, 5, '#6a3a18');
+  // stern cabin
+  R(-18, -17, 13, 8, '#8a5a2c'); R(-18, -17, 13, 1, '#a8743a'); R(-19, -19, 15, 3, '#5a3818'); R(-15, -15, 4, 3, '#ffe9a0'); R(-9, -15, 3, 3, '#ffe9a0');
+  // rider: the player's own hero standing at the helm
+  if (o.rider) {
+    const spr = heroFrame('side', 0, armorTier(), save.look, false);
+    ctx.save(); ctx.translate(-1, -9 + Math.sin(t * 2.6) * 0.4); ctx.rotate(-roll); ctx.drawImage(spr, -10, -23); ctx.restore();
+    R(-3, -10, 6, 2, '#4a2a10');
+  }
+  // masts, sails, rigging
+  R(3, -40, 3, 31, '#4a2a10'); R(-1, -42, 11, 3, '#6a3a18'); R(-8, -26, 20, 2, '#5a3412');
+  const bill = Math.sin(t * 1.9) * 1.2;
+  if (o.sails) {
+    ctx.fillStyle = '#f6efdc'; ctx.beginPath(); ctx.moveTo(6, -39); ctx.quadraticCurveTo(26 + bill, -30, 27 + bill * 0.6, -13); ctx.lineTo(6, -13); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(150,130,90,.35)'; ctx.beginPath(); ctx.moveTo(16, -34); ctx.quadraticCurveTo(26 + bill, -28, 27 + bill * 0.6, -13); ctx.lineTo(16, -13); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#d4c8a8'; for (let k = 0; k < 4; k++) ctx.fillRect(7, -34 + k * 6, 20, 0.8);
+    ctx.fillStyle = '#c23a2a'; ctx.beginPath(); ctx.arc(15, -24, 4, 0, 6.3); ctx.fill(); ctx.fillStyle = '#f6efdc'; ctx.fillRect(13, -25, 4, 1.5); ctx.fillRect(14.5, -27, 1.5, 5);
+    ctx.fillStyle = '#e8dcc0'; ctx.beginPath(); ctx.moveTo(8, -24); ctx.lineTo(-7, -26 + bill * 0.4); ctx.lineTo(-7, -12); ctx.lineTo(8, -12); ctx.closePath(); ctx.fill();
+  } else { R(-8, -26, 20, 4, '#e8dcc0'); }
+  ctx.strokeStyle = 'rgba(40,24,10,.75)'; ctx.lineWidth = 0.6;
+  ctx.beginPath(); ctx.moveTo(4, -41); ctx.lineTo(34, -10); ctx.moveTo(4, -41); ctx.lineTo(-19, -10); ctx.moveTo(4, -41); ctx.lineTo(24, -9); ctx.stroke();
+  // flag
+  R(4, -48, 1, 7, '#3a2410'); ctx.fillStyle = '#d8402c';
+  for (let k = 0; k < 7; k++) ctx.fillRect(5 + k, -48 + Math.sin(t * 6 + k * 0.7) * 0.9, 1, 4 - k * 0.3);
+  ctx.restore();
+}
+
+function drawSea() {
+  const ZS = Math.max(2, Z - 1), s = sea!, vw = W / ZS, vh = H / ZS, mw = SEA_W * TS, mh = SEA_H * TS;
+  const tx = clamp(ship.x - vw / 2, 0, mw - vw), ty = clamp(ship.y - vh / 2, 0, mh - vh);
+  cam.x += (tx - cam.x) * 0.1; cam.y += (ty - cam.y) * 0.1;
+  const camX = cam.x, camY = cam.y;
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = '#2a7ccc'; ctx.fillRect(0, 0, W, H);
+  ctx.setTransform(ZS, 0, 0, ZS, -Math.round(camX * ZS), -Math.round(camY * ZS));
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(s.img, 0, 0, mw, mh);
+  // wave glints on open water
+  ctx.fillStyle = 'rgba(255,255,255,.3)';
+  const x0 = Math.max(0, Math.floor(camX / TS)), x1 = Math.min(SEA_W - 1, Math.ceil((camX + vw) / TS)), y0 = Math.max(0, Math.floor(camY / TS)), y1 = Math.min(SEA_H - 1, Math.ceil((camY + vh) / TS));
+  for (let yy = y0; yy <= y1; yy++) for (let xx = x0; xx <= x1; xx++) {
+    if ((xx * 11 + yy * 17) % 5 !== 0) continue;
+    if (s.land[Math.floor((yy * TS + 8) / SC) * s.gw + Math.floor((xx * TS + 8) / SC)]) continue;
+    const o = (time * 7 + xx * 3 + yy * 2) % 16; ctx.fillRect(xx * TS + o - 3, yy * TS + 5 + (xx % 5), 5, 1);
+  }
+  // piers + huts
+  for (const isl of s.islands) {
+    if (isl.dock.x < camX - 90 || isl.dock.x > camX + vw + 90 || isl.dock.y < camY - 90 || isl.dock.y > camY + vh + 90) continue;
+    ctx.save(); ctx.translate(isl.dock.x, isl.dock.y); ctx.rotate(isl.ang + Math.PI);
+    ctx.fillStyle = '#7a4e24'; ctx.fillRect(0, -4, 36, 8);
+    ctx.fillStyle = '#5a3818'; for (let p = 4; p < 36; p += 6) ctx.fillRect(p, -4, 1, 8);
+    ctx.fillStyle = '#3a2410'; ctx.fillRect(-1, -5, 3, 3); ctx.fillRect(-1, 2, 3, 3); ctx.fillRect(34, -5, 3, 3); ctx.fillRect(34, 2, 3, 3);
+    ctx.restore();
+    const hx = Math.round(isl.hut.x), hy = Math.round(isl.hut.y);
+    ctx.fillStyle = 'rgba(0,0,0,.2)'; ctx.fillRect(hx - 10, hy, 22, 3);
+    ctx.fillStyle = '#d8c89c'; ctx.fillRect(hx - 9, hy - 10, 18, 10); ctx.fillStyle = '#b8a678'; ctx.fillRect(hx - 9, hy - 3, 18, 3);
+    ctx.fillStyle = '#a8412c'; ctx.fillRect(hx - 11, hy - 14, 22, 5); ctx.fillRect(hx - 8, hy - 17, 16, 3);
+    ctx.fillStyle = '#5a3818'; ctx.fillRect(hx - 2, hy - 7, 4, 7); ctx.fillStyle = '#ffe27a'; ctx.fillRect(hx + 4, hy - 8, 3, 3);
+  }
+  // trees and rocks (sorted by y)
+  for (const t of s.trees) {
+    if (t.x < camX - 24 || t.x > camX + vw + 24 || t.y < camY - 10 || t.y > camY + vh + 40) continue;
+    ctx.drawImage(t.spr, Math.round(t.x - t.spr.width / 2 + Math.sin(time * 1.5 + t.x * 0.05) * 0.4), Math.round(t.y - t.spr.height));
+  }
+  // island labels
+  ctx.textAlign = 'center'; ctx.font = 'bold 7px "Pixelify Sans", "Mitr", sans-serif';
+  s.islands.forEach((isl, i) => {
+    const st = getStage(isl.id), lock = save.level < st.rec, lx = isl.cx * TS, ly = (isl.cy - shoreR(isl, -Math.PI / 2) - 2.2) * TS;
+    if (lx < camX - 80 || lx > camX + vw + 80 || ly < camY - 24 || ly > camY + vh + 24) return;
+    const label = `${i + 1}. ${st.name}`, wlab = ctx.measureText(label).width + 8;
+    ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(lx - wlab / 2, ly - 8, wlab, 10);
+    ctx.fillStyle = lock ? '#ff9a8a' : '#fff6c0'; ctx.fillText(label, lx, ly);
+    ctx.font = '6px "Pixelify Sans", "Mitr", sans-serif'; ctx.fillStyle = lock ? '#ffb0a0' : '#9affb0';
+    ctx.fillText(i === 0 ? 'บ้านเกิด' : lock ? `LV ${st.rec}` : save.quests[`visit-${isl.id}`] ? 'เปิดแล้ว' : 'ใหม่!', lx, ly + 8);
+    ctx.font = 'bold 7px "Pixelify Sans", "Mitr", sans-serif';
+  });
+  // dock pulse on the target
+  const tg = navTarget();
+  ctx.strokeStyle = 'rgba(255,230,120,.9)'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(tg.dock.x, tg.dock.y, 10 + Math.sin(time * 4) * 2.5, 0, 6.3); ctx.stroke();
+  // GPS route line
+  if (gpsOn && navPts.length > 1) {
+    ctx.save(); ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    ctx.beginPath(); navPts.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
+    ctx.strokeStyle = 'rgba(0,50,110,.5)'; ctx.lineWidth = 5; ctx.stroke();
+    ctx.strokeStyle = '#ffe27a'; ctx.lineWidth = 2.6; ctx.setLineDash([8, 6]); ctx.lineDashOffset = -time * 22; ctx.stroke();
+    ctx.setLineDash([]); ctx.fillStyle = '#fff6c0';
+    let acc = 0;
+    for (let i = 1; i < navPts.length; i++) {
+      const p0 = navPts[i - 1], p1 = navPts[i], sl = Math.hypot(p1.x - p0.x, p1.y - p0.y); acc += sl;
+      if (acc > 90) { acc = 0; const ang = Math.atan2(p1.y - p0.y, p1.x - p0.x); ctx.save(); ctx.translate(p1.x, p1.y); ctx.rotate(ang); ctx.beginPath(); ctx.moveTo(5, 0); ctx.lineTo(-4, -4); ctx.lineTo(-4, 4); ctx.closePath(); ctx.fill(); ctx.restore(); }
+    }
+    ctx.restore();
+  }
+  // wake + ship
+  for (const p of ship.wake) { ctx.globalAlpha = Math.max(0, p.t); ctx.fillStyle = '#e8f8ff'; ctx.fillRect(Math.round(p.x), Math.round(p.y), 3, 1); }
+  ctx.globalAlpha = 1;
+  drawShip(ship.x, ship.y, ship.face, time, { sails: true, rider: true, vx: ship.vx });
+  drawTag(ship.x, ship.y - 54, save.name || 'ฉัน', save.level, true);
+  // drifting cloud shadows
+  ctx.fillStyle = 'rgba(14,60,130,.1)';
+  for (const c of clouds) {
+    c.x += c.sp * 0.016; if (c.x > mw + 150) c.x = -150;
+    if (c.x < camX - c.r * 2 || c.x > camX + vw + c.r * 2 || c.y < camY - c.r || c.y > camY + vh + c.r) continue;
+    ctx.beginPath(); ctx.ellipse(c.x, c.y, c.r, c.r * 0.5, 0, 0, 6.3); ctx.ellipse(c.x + c.r * 0.5, c.y - c.r * 0.12, c.r * 0.7, c.r * 0.36, 0, 0, 6.3); ctx.ellipse(c.x - c.r * 0.55, c.y + c.r * 0.1, c.r * 0.6, c.r * 0.3, 0, 0, 6.3); ctx.fill();
+  }
+  // light grading + vignette
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.save(); ctx.globalCompositeOperation = 'multiply'; ctx.fillStyle = '#f6f9ff'; ctx.fillRect(0, 0, W, H); ctx.restore();
+  if (vignette) { ctx.globalAlpha = 0.32; ctx.drawImage(vignette, 0, 0, W, H); ctx.globalAlpha = 1; }
+  // navigation arrow when the target is off screen
+  const sx = (tg.dock.x - camX) * ZS, sy = (tg.dock.y - camY) * ZS, mg = 44 * DPR;
+  if (gpsOn && (sx < mg || sx > W - mg || sy < mg || sy > H - mg)) {
+    const cx = W / 2, cy = H / 2, dx = sx - cx, dy = sy - cy;
+    const k = Math.min((W / 2 - mg) / Math.max(1, Math.abs(dx)), (H / 2 - mg) / Math.max(1, Math.abs(dy)));
+    const ax = cx + dx * k, ay = cy + dy * k, a = Math.atan2(dy, dx), st = getStage(tg.id);
+    ctx.save(); ctx.translate(ax, ay);
+    ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.beginPath(); ctx.arc(0, 0, 17 * DPR, 0, 6.3); ctx.fill();
+    ctx.rotate(a); ctx.fillStyle = '#ffd84a'; ctx.strokeStyle = '#000'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(13 * DPR, 0); ctx.lineTo(-7 * DPR, -9 * DPR); ctx.lineTo(-3 * DPR, 0); ctx.lineTo(-7 * DPR, 9 * DPR); ctx.closePath(); ctx.stroke(); ctx.fill();
+    ctx.restore();
+    ctx.font = `${Math.round(11 * DPR)}px "Mitr", sans-serif`; ctx.textAlign = 'center'; ctx.lineWidth = 3; ctx.strokeStyle = '#000'; ctx.fillStyle = '#fff';
+    const label = `${st.name} • ${Math.round(dist(ship.x, ship.y, tg.dock.x, tg.dock.y) / TS)}`;
+    const ly = ay + (ay < H / 2 ? 30 : -24) * DPR; ctx.strokeText(label, ax, ly); ctx.fillText(label, ax, ly);
+  }
+  // minimap
+  const mc = mmEl.getContext('2d')!;
+  mc.drawImage(s.mini, 0, 0);
+  if (gpsOn && navPts.length > 1) { mc.strokeStyle = '#ffe27a'; mc.lineWidth = 1.6; mc.beginPath(); navPts.forEach((p, i) => i ? mc.lineTo(p.x / TS, p.y / TS) : mc.moveTo(p.x / TS, p.y / TS)); mc.stroke(); }
+  mc.fillStyle = '#ffd84a'; mc.fillRect(Math.floor(tg.dock.x / TS) - 3, Math.floor(tg.dock.y / TS) - 3, 7, 7);
+  mc.fillStyle = '#fff'; mc.fillRect(Math.floor(ship.x / TS) - 3, Math.floor(ship.y / TS) - 3, 6, 6);
+  mc.strokeStyle = 'rgba(255,255,255,.7)'; mc.lineWidth = 1.5; mc.strokeRect(Math.floor(camX / TS), Math.floor(camY / TS), Math.floor(vw / TS), Math.floor(vh / TS));
+}
+
+function openSeaChart() {
+  const s = sea!;
+  const rows = s.islands.map((isl, i) => {
+    const st = getStage(isl.id), lock = save.level < st.rec, on = navTarget().id === isl.id;
+    return `<button class="sc-row ${lock ? 'lock' : ''} ${on ? 'on' : ''}" data-id="${isl.id}"><b>${i + 1}</b><span>${esc(st.name)}</span><i>${lock ? 'LV ' + st.rec : save.quests[`visit-${isl.id}`] ? 'เปิดแล้ว' : 'ใหม่'}</i></button>`;
+  }).join('');
+  const p = panel(`<h2>แผนที่ทะเล โลก 1</h2><div class="sub">แตะเกาะเพื่อตั้งเป็นเป้าหมายนำทาง</div><canvas id="sc" class="wm"></canvas><div class="sc-list">${rows}</div><div class="row"><button class="btn alt" id="sc-close">ปิด</button></div>`);
+  const cv = p.el.querySelector('#sc') as HTMLCanvasElement; cv.width = SEA_W; cv.height = SEA_H;
+  const c = cv.getContext('2d')!; c.drawImage(s.mini, 0, 0);
+  const tg = navTarget();
+  s.islands.forEach((isl, i) => { c.fillStyle = save.level >= getStage(isl.id).rec ? '#fff' : '#ff8a7a'; c.fillRect(isl.cx - 3, isl.cy - 3, 6, 6); c.font = 'bold 13px sans-serif'; c.fillStyle = '#000'; c.fillText(String(i + 1), isl.cx + 6, isl.cy - 5); });
+  c.strokeStyle = '#ffd84a'; c.lineWidth = 2; c.strokeRect(tg.cx - 9, tg.cy - 9, 18, 18);
+  c.fillStyle = '#ffe14a'; c.fillRect(Math.floor(ship.x / TS) - 4, Math.floor(ship.y / TS) - 4, 8, 8);
+  p.el.querySelectorAll<HTMLButtonElement>('.sc-row').forEach(b => { b.onclick = () => { save.nav = +b.dataset.id! + 1; writeSave(save); sfx('click'); toast(`ตั้งเป้าหมายนำทาง: ${getStage(save.nav - 1).name}`); p.close(); }; });
+  (p.el.querySelector('#sc-close') as HTMLElement).onclick = () => { sfx('click'); p.close(); };
+}
+
+// ================================================================== other players + chat (Realtime Database)
+interface Remote { uid: string; n: string; l: number; x: number; y: number; tx: number; ty: number; d: number; f: number; m: number; k: number[]; a: number; w: number; anim: number; bubble: string; bubbleT: number; ct: number; }
+const remotes = new Map<string, Remote>();
+let roomId = '', leaveRoom: (() => void) | null = null, sendT = 0, lastSent = '', lastChatAt = 0;
+let myBubble = { text: '', t: 0 };
+const lookOf = (k: number[]): Look => ({ skin: k[0] ?? 0, hair: k[1] ?? 0, helmet: k[2] ?? 0, plume: k[3] ?? 0, trim: k[4] ?? 0, cape: k[5] ?? 0, boots: k[6] ?? 0 });
+function presenceNow(): Presence {
+  const L = save.look, c = Math.cos(P.fa), sn = Math.sin(P.fa);
+  return { n: save.name, l: save.level, x: Math.round(P.x), y: Math.round(P.y), d: Math.abs(c) >= Math.abs(sn) * 0.9 ? 0 : sn > 0 ? 1 : 2, f: c < 0 ? -1 : 1, m: P.moving ? 1 : 0, k: [L.skin, L.hair, L.helmet, L.plume, L.trim, L.cape, L.boots], a: armorTier(), w: weaponIdx() };
+}
+function leaveIslandRoom() { if (leaveRoom) { leaveRoom(); leaveRoom = null; } remotes.clear(); roomId = ''; lastSent = ''; }
+function joinIslandRoom() {
+  leaveIslandRoom();
+  if (!uid || !rtConfigured || !save.name) return;
+  roomId = 'i' + stage.id;
+  const mk = (id: string, p: Presence): Remote => ({ uid: id, n: String(p.n ?? '?').slice(0, 14), l: p.l ?? 1, x: p.x, y: p.y, tx: p.x, ty: p.y, d: p.d ?? 1, f: p.f ?? 1, m: p.m ?? 0, k: p.k ?? [], a: p.a ?? 0, w: p.w ?? 0, anim: 0, bubble: '', bubbleT: 0, ct: p.ct ?? 0 });
+  leaveRoom = joinRoom(roomId, uid, presenceNow(), {
+    add: (id, p) => { const r = mk(id, p); if (p.c && p.ct && Date.now() - p.ct < 8000) { r.bubble = String(p.c).slice(0, 80); r.bubbleT = 5; } remotes.set(id, r); },
+    change: (id, p) => {
+      const r = remotes.get(id); if (!r) { remotes.set(id, mk(id, p)); return; }
+      r.n = String(p.n ?? r.n).slice(0, 14); r.l = p.l ?? r.l; r.tx = p.x; r.ty = p.y; r.d = p.d ?? r.d; r.f = p.f ?? r.f; r.k = p.k ?? r.k; r.a = p.a ?? r.a; r.w = p.w ?? r.w;
+      if (p.c && p.ct && p.ct !== r.ct) { r.ct = p.ct; r.bubble = String(p.c).slice(0, 80); r.bubbleT = 6; addChatLine(r.n, r.bubble); }
+    },
+    remove: id => { remotes.delete(id); },
+  });
+}
+function updateMultiplayer(dt: number) {
+  for (const r of remotes.values()) {
+    const k = Math.min(1, dt * 9), mv = Math.hypot(r.tx - r.x, r.ty - r.y);
+    r.x += (r.tx - r.x) * k; r.y += (r.ty - r.y) * k; r.m = mv > 1.2 ? 1 : 0;
+    r.anim += dt; r.bubbleT = Math.max(0, r.bubbleT - dt);
+  }
+  myBubble.t = Math.max(0, myBubble.t - dt);
+  sendT -= dt;
+  if (leaveRoom && sendT <= 0) {
+    sendT = 0.2; const p = presenceNow(), key = [p.x, p.y, p.d, p.f, p.m, p.l, p.a, p.w, p.k.join('')].join(',');
+    if (key !== lastSent) { lastSent = key; patchPresence(roomId, uid, p); }
+  }
+}
+function pillPath(x: number, y: number, w: number, h: number, r: number) {
+  ctx.beginPath(); ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y); ctx.quadraticCurveTo(x + w, y, x + w, y + r); ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h); ctx.lineTo(x + r, y + h); ctx.quadraticCurveTo(x, y + h, x, y + h - r); ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y); ctx.closePath();
+}
+// small capsule: [name | Lv.N]
+function drawTag(x: number, y: number, name: string, lv: number, me: boolean) {
+  ctx.save(); ctx.textAlign = 'center';
+  ctx.font = 'bold 3.4px "Mitr", "Pixelify Sans", sans-serif';
+  const lt = 'Lv.' + lv, wl = ctx.measureText(lt).width + 5;
+  ctx.font = '3.6px "Mitr", "Pixelify Sans", sans-serif';
+  const wn = ctx.measureText(name).width + 6, w = wn + wl, h = 6.4, x0 = Math.round(x - w / 2), y0 = Math.round(y - 6);
+  ctx.fillStyle = 'rgba(0,0,0,.28)'; pillPath(x0 + 0.4, y0 + 0.8, w, h, 3.2); ctx.fill();
+  ctx.fillStyle = 'rgba(14,18,30,.72)'; pillPath(x0, y0, w, h, 3.2); ctx.fill();
+  ctx.strokeStyle = me ? 'rgba(140,210,255,.75)' : 'rgba(255,230,160,.45)'; ctx.lineWidth = 0.45; ctx.stroke();
+  const g = ctx.createLinearGradient(0, y0, 0, y0 + h);
+  if (me) { g.addColorStop(0, '#9adcff'); g.addColorStop(1, '#3a86c8'); } else { g.addColorStop(0, '#ffe27a'); g.addColorStop(1, '#c8901c'); }
+  ctx.save(); pillPath(x0, y0, w, h, 3.2); ctx.clip(); ctx.fillStyle = g; ctx.fillRect(x0 + wn, y0, wl, h); ctx.restore();
+  ctx.fillStyle = 'rgba(0,0,0,.7)'; ctx.fillText(name, x0 + wn / 2 + 0.3, y0 + 4.8);
+  ctx.fillStyle = me ? '#cfeaff' : '#fff'; ctx.fillText(name, x0 + wn / 2, y0 + 4.5);
+  ctx.font = 'bold 3.4px "Mitr", "Pixelify Sans", sans-serif'; ctx.fillStyle = '#1a1410'; ctx.fillText(lt, x0 + wn + wl / 2, y0 + 4.4);
+  ctx.restore();
+}
+function npcRole(nd: { quest?: boolean; craft?: boolean; harbor?: boolean; role?: string }) {
+  if (nd.role) return nd.role;
+  return nd.quest ? 'รับภารกิจ' : nd.craft ? 'ร้านช่างตีดาบ' : nd.harbor ? 'ท่าเรือ • เรียกเรือ' : 'เล่าเรื่อง';
+}
+// role chip (coloured) with a tiny name under it
+function drawNpcTag(x: number, y: number, name: string, role: string, col: string) {
+  ctx.save(); ctx.textAlign = 'center'; ctx.font = 'bold 3.6px "Mitr", "Pixelify Sans", sans-serif';
+  const w = ctx.measureText(role).width + 6, h = 6.2, x0 = Math.round(x - w / 2), y0 = Math.round(y - 11);
+  ctx.fillStyle = 'rgba(0,0,0,.3)'; pillPath(x0 + 0.4, y0 + 0.8, w, h, 3.1); ctx.fill();
+  const g = ctx.createLinearGradient(0, y0, 0, y0 + h); g.addColorStop(0, col); g.addColorStop(1, col + 'bb');
+  ctx.fillStyle = g; pillPath(x0, y0, w, h, 3.1); ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,.45)'; ctx.lineWidth = 0.4; ctx.stroke();
+  ctx.fillStyle = '#16100a'; ctx.fillText(role, Math.round(x), y0 + 4.3);
+  ctx.font = '3.2px "Mitr", "Pixelify Sans", sans-serif';
+  ctx.fillStyle = 'rgba(0,0,0,.75)'; ctx.fillText(name, Math.round(x) + 0.3, y0 + h + 3.7); ctx.fillStyle = '#f4ecd4'; ctx.fillText(name, Math.round(x), y0 + h + 3.4);
+  ctx.restore();
+}
+function drawBubble(x: number, y: number, text: string, a: number) {
+  const lines: string[] = []; for (let i = 0; i < text.length; i += 16) lines.push(text.slice(i, i + 16));
+  ctx.save(); ctx.globalAlpha = Math.min(1, a * 2); ctx.font = '4.4px "Mitr", "Pixelify Sans", sans-serif'; ctx.textAlign = 'center';
+  const w = Math.max(...lines.map(l => ctx.measureText(l).width)) + 7, h = lines.length * 6 + 4, bx = Math.round(x - w / 2), by = Math.round(y - h);
+  ctx.fillStyle = 'rgba(0,0,0,.25)'; pillPath(bx + 0.5, by + 0.8, w, h, 2.4); ctx.fill();
+  ctx.fillStyle = '#fffdf4'; pillPath(bx, by, w, h, 2.4); ctx.fill(); ctx.strokeStyle = '#2a1f17'; ctx.lineWidth = 0.5; ctx.stroke();
+  ctx.fillStyle = '#fffdf4'; ctx.beginPath(); ctx.moveTo(Math.round(x) - 1.6, by + h - 0.2); ctx.lineTo(Math.round(x) + 1.6, by + h - 0.2); ctx.lineTo(Math.round(x), by + h + 2.2); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#2a1f17'; lines.forEach((l, i) => ctx.fillText(l, Math.round(x), by + 5.4 + i * 6)); ctx.restore();
+}
+function drawRemote(r: Remote) {
+  const dir = (['side', 'down', 'up'] as Dir[])[r.d] ?? 'down', fr = r.m ? [0, 1, 0, 2][Math.floor(r.anim * 10) % 4] : 0;
+  const spr = heroFrame(dir, fr, r.a, lookOf(r.k), false), bob = r.m ? Math.abs(Math.sin(r.anim * 10)) : Math.sin(r.anim * 3) * 0.3;
+  drawShadow(ctx, r.x, r.y, 5.5, 2.2);
+  ctx.save(); ctx.translate(r.x, r.y - bob); ctx.scale(dir === 'side' ? r.f : 1, 1); ctx.drawImage(spr, -spr.width / 2, -spr.height + 1); ctx.restore();
+  const wp = WEAPONS[clamp(r.w, 0, WEAPONS.length - 1)];
+  ctx.save(); ctx.translate(r.x + (dir === 'side' ? 4 * r.f : dir === 'down' ? 6 : -6), r.y - 11 - bob);
+  ctx.rotate(dir === 'side' ? (r.f > 0 ? -1.15 : Math.PI + 1.15) : dir === 'down' ? 1.9 : -2.2);
+  ctx.fillStyle = wp.color; ctx.fillRect(1, -1, 10 + r.w * 0.8, 2); ctx.fillStyle = '#7a5a2a'; ctx.fillRect(-1, -1.5, 3, 3); ctx.restore();
+  drawTag(r.x, r.y - 24 - bob, r.n, r.l, false);
+  if (r.bubbleT > 0 && r.bubble) drawBubble(r.x, r.y - 31 - bob, r.bubble, r.bubbleT);
+}
+
+// chat bar + log
+const chatBar = $('chatbar'), chatIn = $('chat-in') as HTMLInputElement;
+function openChat() { if (scene !== 'map' || panelOpen()) return; chatBar.classList.remove('hidden'); setTimeout(() => chatIn.focus(), 30); }
+function closeChat() { chatBar.classList.add('hidden'); chatIn.blur(); chatIn.value = ''; }
+function addChatLine(name: string, text: string) {
+  const log = $('chatlog'), d = document.createElement('div'), b = document.createElement('b');
+  d.className = 'cl'; b.textContent = name + ': '; d.appendChild(b); d.appendChild(document.createTextNode(text)); log.appendChild(d);
+  while (log.childElementCount > 6) log.firstElementChild!.remove();
+  setTimeout(() => d.classList.add('old'), 9000); setTimeout(() => d.remove(), 10800);
+}
+function sendChat() {
+  const text = chatIn.value.replace(/\s+/g, ' ').trim().slice(0, 80);
+  if (!text) { closeChat(); return; }
+  if (Date.now() - lastChatAt < 1200) { toast('พิมพ์เร็วเกินไป รอสักครู่'); return; }
+  lastChatAt = Date.now(); myBubble = { text, t: 6 }; addChatLine(save.name || 'ฉัน', text);
+  if (leaveRoom) patchPresence(roomId, uid, { c: text, ct: lastChatAt });
+  sfx('click'); closeChat();
+}
+$('chat-send').addEventListener('click', sendChat);
+chatIn.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); sendChat(); } else if (e.key === 'Escape') closeChat(); });
+$('btn-chat').addEventListener('click', () => { unlockAudio(); sfx('click'); if (chatBar.classList.contains('hidden')) openChat(); else closeChat(); });
+
 // ================================================================== main loop
 let last = performance.now();
 function frame(now: number) {
@@ -1880,6 +2764,9 @@ function frame(now: number) {
     } else { flags.act = flags.atk = flags.dodge = flags.s1 = flags.s2 = flags.s3 = false; }
     updateFx(panelOpen() ? 0 : dt);
     drawWorld();
+  } else if (scene === 'sea' && sea) {
+    if (!panelOpen() && !isPortraitTouch()) updateSea(dt); else { flags.act = flags.dodge = false; }
+    drawSea();
   } else { flags.act = flags.atk = flags.dodge = flags.skill = false; drawTitleBg(); }
   requestAnimationFrame(frame);
 }
@@ -1896,6 +2783,7 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 addEventListener('pagehide', flushCloud);
 
 function hideAllForLogin() {
+  leaveIslandRoom(); closeChat(); $('chatlog').classList.add('hidden');
   closeAllPanels(); scene = 'title'; inStage = false; setMusic('off');
   for (const id of ['hud', 'touch', 'bossbar', 'side-btns', 'lobby', 'objective']) $(id).classList.add('hidden');
   mmEl.classList.add('hidden');
@@ -1931,11 +2819,17 @@ function showCreate() {
     const name = inp.value.replace(/\s+/g, ' ').trim();
     if (name.length < 2) { err.textContent = 'ชื่อต้องมีอย่างน้อย 2 ตัวอักษร'; sfx('wrong'); return; }
     sfx('click'); save.name = name; writeSave(save); flushCloud(); p.close();
-    openPrep(() => { save.prepped = true; writeSave(save); flushCloud(); showTitle(); }, true);
+    openPrep(() => { save.prepped = true; writeSave(save); flushCloud(); void startPlaying(); }, true);
   };
   (p.el.querySelector('#nm-ok') as HTMLElement).onclick = ok;
   inp.addEventListener('keydown', e => { if (e.key === 'Enter') ok(); });
   (p.el.querySelector('#nm-out') as HTMLElement).onclick = async () => { sfx('click'); p.close(); await logout(); };
+}
+async function startPlaying() {
+  hideLobby(); $('login').classList.add('hidden');
+  save.loc = { kind: 'island', id: 1 };
+  $('hud').classList.remove('hidden'); $('touch').classList.remove('hidden');
+  await enterStage(1);
 }
 let authSeq = 0;
 async function onUser(u: User | null) {
@@ -1951,8 +2845,31 @@ async function onUser(u: User | null) {
   else { const legacy = takeLegacySave(); if (legacy) { save = legacy; dropLegacySave(); } else save = loadSave(); }
   hp = stats().maxHp; sp = 0;
   $('login').classList.add('hidden');
-  if (!save.name) showCreate(); else { writeSave(save); showTitle(); }
+  if (!save.name) showCreate(); else { writeSave(save); void startPlaying(); }
 }
-watchAuth(u => { void onUser(u); });
+function devFake() {
+  const mkr = (id: string, n: string, l: number, dx: number, dy: number, k: number[], text = ''): Remote => ({ uid: id, n, l, x: P.x + dx, y: P.y + dy, tx: P.x + dx, ty: P.y + dy, d: 1, f: 1, m: 0, k, a: 1, w: 2, anim: 0, bubble: text, bubbleT: text ? 999 : 0, ct: 0 });
+  remotes.set('a', mkr('a', 'นักรบฟ้า', 12, -50, -10, [1, 2, 1, 3, 2, 3, 1], 'สวัสดีทุกคน! ไปฟาร์มกันไหม'));
+  remotes.set('b', mkr('b', 'Mimi', 45, 46, 8, [3, 0, 2, 1, 4, 0, 2]));
+  remotes.set('c', mkr('c', 'ปลาทอง', 3, 8, -46, [0, 4, 0, 5, 0, 1, 0], 'รับเควสที่ไหนครับ'));
+  myBubble = { text: 'เกมนี้สนุกมาก!', t: 999 };
+}
+function devAtDock() { if (map.dock) { P.x = map.dock.x; P.y = map.dock.y - 36; } }
+function devAtFarm() { const fo = farmOutpost(); if (fo) { P.x = fo.x; P.y = fo.y + 24; } }
+const devQs = new URLSearchParams(location.search);
+if (import.meta.env.DEV && devQs.has('dbg')) {
+  save = freshSave(); save.name = 'ทดสอบ'; save.started = true; save.level = +(devQs.get('lv') ?? 10); hp = stats().maxHp;
+  $('login').classList.add('hidden');
+  const isl = devQs.get('island');
+  save.nav = +(devQs.get('nav') ?? 0);
+  if (isl) save.quests['visit-' + isl] = true;
+  if (devQs.get('sea') !== null) { enterSea(); if (devQs.has('chart')) openSeaChart(); } else if (isl) { void enterStage(+isl); if (devQs.has('q')) setTimeout(openQuest, 900); if (devQs.has('bag')) setTimeout(() => openPrep(undefined, false, 'bag'), 900); if (devQs.has('dress')) setTimeout(() => openPrep(undefined, false, 'body'), 900);
+    if (devQs.get('ship')) shipCall = { st: devQs.get('ship') === 'coming' ? 'coming' : 'moored', t: devQs.get('ship') === 'coming' ? 0.5 : 1 };
+    if (devQs.get('at') === 'dock') devAtDock();
+    if (devQs.get('at') === 'farm') devAtFarm();
+    if (devQs.has('fake')) devFake(); if (devQs.has('doing')) { save.quest = { kind: 'kill', need: 5, have: 3, mul: 0.5, text: 'ปราบมอนสเตอร์ 5 ตัว' }; refreshHud(); } } else showTitle();
+} else watchAuth(u => { void onUser(u); });
 requestAnimationFrame(frame);
 
+
+setTimeout(() => { if (!sea) sea = genSea(); }, 2500);

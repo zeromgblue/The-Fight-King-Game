@@ -15,7 +15,7 @@
 <canvas id="game"></canvas>
 
 <div id="hud" class="hidden">
-  <div class="hero-card">
+  <div id="center-hud"><div class="hero-card">
     <div class="lv-badge" id="lv-ring"><div class="lv-in"><small>LV</small><b id="hud-lv">1</b></div></div>
     <div class="hero-bars">
       <div class="bar hp"><i id="hud-hp"></i><span id="hud-hp-t"></span></div>
@@ -23,19 +23,23 @@
       <div class="bar sp" id="sp-bar"><i id="hud-sp"></i><span id="hud-sp-t">พลังปัญญา</span></div>
     </div>
   </div>
+  <div id="hotbar"></div></div>
   <div class="gold-pill"><span class="coin"></span><b id="hud-gold">0</b></div>
   <div class="top-center">
     <div class="stage-name" id="hud-stage"></div>
+    <div id="quest-pill" class="hidden"></div>
     <div id="objective" class="hidden"><div class="obj-ic"></div><div class="obj-tx"><b id="obj-text"></b><span id="obj-dist"></span></div></div>
   </div>
 </div>
 <div id="side-btns" class="hidden">
   <button id="btn-map" class="round-btn" aria-label="แผนที่"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2z"/><path d="M9 4v14M15 6v14"/></svg><em>แผนที่</em></button>
   <button id="btn-gps" class="round-btn on" aria-label="นำทาง"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 5l3 8-3-2-3 2z" fill="currentColor"/></svg><em>นำทาง</em></button>
-  <button id="btn-prep" class="round-btn" aria-label="แต่งตัว"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M12 8v8M8 12h8"/></svg><em>แต่งตัว</em></button>
+  <button id="btn-prep" class="round-btn" aria-label="กระเป๋า"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M7 9a5 5 0 0 1 10 0v11a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1z"/><path d="M9.5 6V5a2.5 2.5 0 0 1 5 0v1"/><path d="M9 14h6"/><path d="M10 17h4"/></svg><em>กระเป๋า</em></button>
+  <button id="btn-dress" class="round-btn" aria-label="แต่งตัว"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M9 4l3 2 3-2 5 3-2.5 3.5L16 9.5V20H8V9.5L6.5 10.5 4 7z"/></svg><em>แต่งตัว</em></button>
   <button id="btn-menu" class="round-btn" aria-label="เมนู"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg><em>เมนู</em></button>
   <button id="btn-home" class="round-btn small" aria-label="หน้าหลัก"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h5v-6h4v6h5V10"/></svg></button>
   <button id="btn-mute" class="round-btn small" aria-label="เสียง"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16.5 9a4 4 0 010 6"/><path class="x" d="M3 3l18 18"/></svg></button>
+  <button id="btn-chat" class="round-btn small" aria-label="แชท"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8M8 12h5"/></svg></button>
 </div>
 <canvas id="minimap" class="hidden"></canvas>
 <div id="bossbar" class="hidden"><div class="bn" id="boss-name"></div><div class="bb"><i id="boss-hp"></i></div></div>
@@ -56,6 +60,8 @@
 
 <div id="lobby" class="hidden"></div>
 <div id="login" class="hidden"></div>
+<div id="chatlog"></div>
+<div id="chatbar" class="hidden"><input id="chat-in" maxlength="80" placeholder="พิมพ์ข้อความ แล้วกด Enter..." autocomplete="off" /><button id="chat-send">ส่ง</button></div>
 <div id="toast"></div>
 <div id="overlay"></div>
 <div id="inapp-block"><b>กรุณาเปิดในเบราว์เซอร์</b><span id="inapp-sub">เกมนี้เล่นในแอปอื่น (Instagram, Facebook, LINE, TikTok ฯลฯ) ไม่ได้ กรุณาเปิดลิงก์ด้วย Chrome หรือ Safari เท่านั้น</span><ol><li>แตะปุ่ม ⋯ หรือ ⋮ มุมบนของแอป</li><li>เลือก "เปิดในเบราว์เซอร์" (Open in browser)</li></ol><button id="inapp-open" class="btn gold">เปิดในเบราว์เซอร์</button><button id="inapp-copy" class="btn alt">คัดลอกลิงก์</button></div>
