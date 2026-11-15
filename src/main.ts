@@ -115,7 +115,7 @@ function questHint() {
 function refreshQuestPill() {
   const el = $('quest-pill'), q = save.quest;
   if (scene !== 'map') { el.classList.add('hidden'); return; }
-  if (!q) { el.classList.remove('hidden', 'done'); el.classList.add('none'); el.textContent = 'ยังไม่มีภารกิจ — รับภารกิจก่อนถึงจะตีมอนสเตอร์ได้'; return; }
+  if (!q) { el.classList.remove('hidden', 'done'); el.classList.add('none'); el.textContent = 'ยังไม่มีภารกิจ — รับก่อนถึงจะตีมอนสเตอร์ได้'; return; }
   el.classList.remove('none');
   el.classList.remove('hidden');
   const done = q.have >= q.need;
@@ -164,22 +164,31 @@ window.addEventListener('blur', () => { keys.clear(); held.atk = false; });
 const touchCapable = window.matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0;
 if (!touchCapable) $('stick').classList.add('hidden');
 
+// floating joystick: touch anywhere in the left part of the screen; the base appears under the thumb and follows it
 (function setupStick() {
-  const el = $('stick'), knob = $('knob');
-  let id = -1; const R = 46;
-  const set = (e: PointerEvent) => {
-    const r = el.getBoundingClientRect();
-    let dx = e.clientX - (r.left + r.width / 2), dy = e.clientY - (r.top + r.height / 2);
-    const d = Math.hypot(dx, dy);
-    if (d > R) { dx = dx / d * R; dy = dy / d * R; }
+  const el = $('stick'), knob = $('knob'), zone = $('stick-zone');
+  if (!touchCapable) { zone.classList.add('hidden'); return; }
+  let id = -1, cx = 0, cy = 0;
+  el.classList.add('idle');
+  const place = () => { const w = el.offsetWidth; el.style.left = `${cx - w / 2}px`; el.style.top = `${cy - w / 2}px`; el.style.bottom = 'auto'; };
+  const reset = () => { id = -1; stick.x = stick.y = 0; knob.style.transform = ''; el.classList.add('idle'); el.style.left = el.style.top = el.style.bottom = ''; };
+  const move = (e: PointerEvent) => {
+    const R = el.offsetWidth * 0.42;
+    let dx = e.clientX - cx, dy = e.clientY - cy; const d = Math.hypot(dx, dy);
+    if (d > R) { const k = (d - R) / d; cx += dx * k; cy += dy * k; place(); dx = e.clientX - cx; dy = e.clientY - cy; } // base trails the thumb
+    const m = Math.min(1, Math.hypot(dx, dy) / R);
     knob.style.transform = `translate(${dx}px,${dy}px)`;
-    const m = Math.hypot(dx, dy) / R;
-    stick.x = m < 0.18 ? 0 : dx / R; stick.y = m < 0.18 ? 0 : dy / R;
+    if (m < 0.14) { stick.x = stick.y = 0; } else { const sc = (m - 0.14) / 0.86, an = Math.atan2(dy, dx); stick.x = Math.cos(an) * sc; stick.y = Math.sin(an) * sc; }
   };
-  el.addEventListener('pointerdown', e => { unlockAudio(); id = e.pointerId; el.setPointerCapture(id); set(e); });
-  el.addEventListener('pointermove', e => { if (e.pointerId === id) set(e); });
-  const end = (e: PointerEvent) => { if (e.pointerId !== id) return; id = -1; stick.x = stick.y = 0; knob.style.transform = ''; };
-  el.addEventListener('pointerup', end); el.addEventListener('pointercancel', end);
+  zone.addEventListener('pointerdown', e => {
+    if (id !== -1 || $('touch').classList.contains('hidden')) return;
+    unlockAudio(); id = e.pointerId; try { zone.setPointerCapture(id); } catch { /* ignore */ }
+    cx = e.clientX; cy = e.clientY; el.classList.remove('idle'); place(); move(e);
+  });
+  zone.addEventListener('pointermove', e => { if (e.pointerId === id) move(e); });
+  for (const t of ['pointerup', 'pointercancel', 'lostpointercapture'] as const) zone.addEventListener(t, e => { if ((e as PointerEvent).pointerId === id) reset(); });
+  window.addEventListener('blur', reset);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) reset(); });
 })();
 
 function bindBtn(id: string, flag: keyof typeof flags, hold = false) {
@@ -709,6 +718,7 @@ function castSkill(i: number) {
     P.swingT = 0.24; P.swingDur = 0.24; P.swingHit = true; P.step = 1;
     slashes.push({ x: P.x, y: P.y - 9, a, dir: 1, spread: 1.1, R: 34, t: 0, dur: 0.24, c: w.color, glow: w.glow, pow: true });
   }
+  sendAction(i + 1, P.fa);
   sp = Math.min(100, sp + 2 * spMul()); refreshHud();
 }
 
@@ -763,7 +773,7 @@ function startSwing() {
   P.kx += Math.cos(P.fa) * lunge; P.ky += Math.sin(P.fa) * lunge;
   const w = gw();
   slashes.push({ x: P.x, y: P.y - 9, a: P.fa, dir: P.step === 1 ? -1 : 1, spread: P.step === 2 ? Math.PI : 1.25, R: P.step === 2 ? 40 : 30, t: 0, dur: P.swingDur, c: w.color, glow: w.glow, pow: P.step === 2 });
-  sfx('swing');
+  sfx('swing'); sendAction(0, P.fa);
   if (weaponIdx() === 3) burst(P.x + Math.cos(P.fa) * 14, P.y - 9 + Math.sin(P.fa) * 14, ['#ff7a2f', '#ffcf4a'], 8, 40, 20);
 }
 
@@ -2630,42 +2640,71 @@ function openSeaChart() {
 }
 
 // ================================================================== other players + chat (Realtime Database)
-interface Remote { uid: string; n: string; l: number; x: number; y: number; tx: number; ty: number; d: number; f: number; m: number; k: number[]; a: number; w: number; anim: number; bubble: string; bubbleT: number; ct: number; }
+interface Remote { uid: string; n: string; l: number; x: number; y: number; tx: number; ty: number; d: number; f: number; m: number; k: number[]; a: number; w: number; anim: number; bubble: string; bubbleT: number; ct: number; q: number; swingT: number; swingA: number; }
 const remotes = new Map<string, Remote>();
-let roomId = '', leaveRoom: (() => void) | null = null, sendT = 0, lastSent = '', lastChatAt = 0;
+let roomId = '', leaveRoom: (() => void) | null = null, sendT = 0, lastPres: Presence | null = null, lastChatAt = 0, actSeq = 0;
 let myBubble = { text: '', t: 0 };
 const lookOf = (k: number[]): Look => ({ skin: k[0] ?? 0, hair: k[1] ?? 0, helmet: k[2] ?? 0, plume: k[3] ?? 0, trim: k[4] ?? 0, cape: k[5] ?? 0, boots: k[6] ?? 0 });
 function presenceNow(): Presence {
   const L = save.look, c = Math.cos(P.fa), sn = Math.sin(P.fa);
   return { n: save.name, l: save.level, x: Math.round(P.x), y: Math.round(P.y), d: Math.abs(c) >= Math.abs(sn) * 0.9 ? 0 : sn > 0 ? 1 : 2, f: c < 0 ? -1 : 1, m: P.moving ? 1 : 0, k: [L.skin, L.hair, L.helmet, L.plume, L.trim, L.cape, L.boots], a: armorTier(), w: weaponIdx() };
 }
-function leaveIslandRoom() { if (leaveRoom) { leaveRoom(); leaveRoom = null; } remotes.clear(); roomId = ''; lastSent = ''; }
+function leaveIslandRoom() { if (leaveRoom) { leaveRoom(); leaveRoom = null; } remotes.clear(); roomId = ''; lastPres = null; }
 function joinIslandRoom() {
   leaveIslandRoom();
   if (!uid || !rtConfigured || !save.name) return;
-  roomId = 'i' + stage.id;
-  const mk = (id: string, p: Presence): Remote => ({ uid: id, n: String(p.n ?? '?').slice(0, 14), l: p.l ?? 1, x: p.x, y: p.y, tx: p.x, ty: p.y, d: p.d ?? 1, f: p.f ?? 1, m: p.m ?? 0, k: p.k ?? [], a: p.a ?? 0, w: p.w ?? 0, anim: 0, bubble: '', bubbleT: 0, ct: p.ct ?? 0 });
+  roomId = 'i' + stage.id; lastPres = presenceNow();
+  const mk = (id: string, p: Presence): Remote => ({ uid: id, n: String(p.n ?? '?').slice(0, 14), l: p.l ?? 1, x: p.x, y: p.y, tx: p.x, ty: p.y, d: p.d ?? 1, f: p.f ?? 1, m: p.m ?? 0, k: p.k ?? [], a: p.a ?? 0, w: p.w ?? 0, anim: 0, bubble: '', bubbleT: 0, ct: p.ct ?? 0, q: p.q ?? 0, swingT: 0, swingA: 0 });
   leaveRoom = joinRoom(roomId, uid, presenceNow(), {
     add: (id, p) => { const r = mk(id, p); if (p.c && p.ct && Date.now() - p.ct < 8000) { r.bubble = String(p.c).slice(0, 80); r.bubbleT = 5; } remotes.set(id, r); },
     change: (id, p) => {
       const r = remotes.get(id); if (!r) { remotes.set(id, mk(id, p)); return; }
       r.n = String(p.n ?? r.n).slice(0, 14); r.l = p.l ?? r.l; r.tx = p.x; r.ty = p.y; r.d = p.d ?? r.d; r.f = p.f ?? r.f; r.k = p.k ?? r.k; r.a = p.a ?? r.a; r.w = p.w ?? r.w;
       if (p.c && p.ct && p.ct !== r.ct) { r.ct = p.ct; r.bubble = String(p.c).slice(0, 80); r.bubbleT = 6; addChatLine(r.n, r.bubble); }
+      if (p.q && p.q !== r.q) { r.q = p.q; remoteAction(r, p.qk ?? 0, (p.qa ?? 0) / 100); }
     },
     remove: id => { remotes.delete(id); },
   });
 }
 function updateMultiplayer(dt: number) {
   for (const r of remotes.values()) {
-    const k = Math.min(1, dt * 9), mv = Math.hypot(r.tx - r.x, r.ty - r.y);
+    const k = Math.min(1, dt * 12), mv = Math.hypot(r.tx - r.x, r.ty - r.y);
     r.x += (r.tx - r.x) * k; r.y += (r.ty - r.y) * k; r.m = mv > 1.2 ? 1 : 0;
-    r.anim += dt; r.bubbleT = Math.max(0, r.bubbleT - dt);
+    r.anim += dt; r.bubbleT = Math.max(0, r.bubbleT - dt); r.swingT = Math.max(0, r.swingT - dt);
   }
   myBubble.t = Math.max(0, myBubble.t - dt);
   sendT -= dt;
   if (leaveRoom && sendT <= 0) {
-    sendT = 0.2; const p = presenceNow(), key = [p.x, p.y, p.d, p.f, p.m, p.l, p.a, p.w, p.k.join('')].join(',');
-    if (key !== lastSent) { lastSent = key; patchPresence(roomId, uid, p); }
+    sendT = 0.125; const p = presenceNow(), patch: Record<string, unknown> = {};
+    for (const key of Object.keys(p) as (keyof Presence)[]) {
+      if (key === 'k') { if (!lastPres || p.k.join() !== lastPres.k.join()) patch.k = p.k; }
+      else if (!lastPres || p[key] !== lastPres[key]) patch[key] = p[key];
+    }
+    lastPres = p;
+    if (Object.keys(patch).length) patchPresence(roomId, uid, patch as Partial<Presence>);
+  }
+}
+// tell the room about a swing (0) or a skill (1-3) so everyone sees the same moves
+function sendAction(kind: number, ang: number) {
+  if (!leaveRoom) return;
+  actSeq = (Math.floor(Date.now() / 5) % 2000000000) + 1;
+  patchPresence(roomId, uid, { q: actSeq, qk: kind, qa: Math.round(ang * 100) });
+}
+// visual-only replay of someone else's attack
+function remoteAction(r: Remote, kind: number, ang: number) {
+  const wp = WEAPONS[clamp(r.w, 0, WEAPONS.length - 1)], c = Math.cos(ang), sn = Math.sin(ang);
+  r.swingT = 0.22; r.swingA = ang; r.d = Math.abs(c) >= Math.abs(sn) * 0.9 ? 0 : sn > 0 ? 1 : 2; r.f = c < 0 ? -1 : 1;
+  if (dist(r.x, r.y, P.x, P.y) < 180) sfx(kind === 2 ? 'crit' : 'swing');
+  if (kind === 0) slashes.push({ x: r.x, y: r.y - 9, a: ang, dir: Math.random() < 0.5 ? 1 : -1, spread: 1.25, R: 28, t: 0, dur: 0.22, c: wp.color, glow: wp.glow, pow: false });
+  else if (kind === 1) {
+    slashes.push({ x: r.x, y: r.y - 9, a: ang, dir: 1, spread: 1.0, R: 30, t: 0, dur: 0.2, c: wp.color, glow: wp.glow, pow: false });
+    for (let i = 0; i < 12; i++) parts.push({ x: r.x + c * 12, y: r.y - 12 + sn * 12, vx: c * rand(150, 230) + rand(-15, 15), vy: sn * rand(150, 230) + rand(-15, 15), life: 0.5, max: 0.5, c: i % 2 ? wp.color : wp.glow, s: 1.4, g: 0, add: true });
+  } else if (kind === 2) {
+    ring(r.x, r.y - 4, 64, wp.glow, 0.4, 4); ring(r.x, r.y - 4, 40, wp.color, 0.3, 3); burst(r.x, r.y - 8, [wp.color, wp.glow, '#fff'], 24, 110, 10);
+    slashes.push({ x: r.x, y: r.y - 9, a: 0, dir: 1, spread: Math.PI, R: 54, t: 0, dur: 0.3, c: wp.color, glow: wp.glow, pow: true }, { x: r.x, y: r.y - 9, a: Math.PI, dir: 1, spread: Math.PI, R: 54, t: 0, dur: 0.3, c: wp.color, glow: wp.glow, pow: true });
+  } else {
+    slashes.push({ x: r.x, y: r.y - 9, a: ang, dir: 1, spread: 1.1, R: 34, t: 0, dur: 0.24, c: wp.color, glow: wp.glow, pow: true });
+    burst(r.x, r.y - 8, [wp.glow, '#fff'], 14, 90, 6);
   }
 }
 function pillPath(x: number, y: number, w: number, h: number, r: number) {
@@ -2721,10 +2760,13 @@ function drawRemote(r: Remote) {
   const spr = heroFrame(dir, fr, r.a, lookOf(r.k), false), bob = r.m ? Math.abs(Math.sin(r.anim * 10)) : Math.sin(r.anim * 3) * 0.3;
   drawShadow(ctx, r.x, r.y, 5.5, 2.2);
   ctx.save(); ctx.translate(r.x, r.y - bob); ctx.scale(dir === 'side' ? r.f : 1, 1); ctx.drawImage(spr, -spr.width / 2, -spr.height + 1); ctx.restore();
-  const wp = WEAPONS[clamp(r.w, 0, WEAPONS.length - 1)];
+  const wp = WEAPONS[clamp(r.w, 0, WEAPONS.length - 1)], sw = r.swingT > 0, kk = sw ? 1 - r.swingT / 0.22 : 0;
+  const idle = dir === 'side' ? (r.f > 0 ? -1.15 : Math.PI + 1.15) : dir === 'down' ? 1.9 : -2.2;
   ctx.save(); ctx.translate(r.x + (dir === 'side' ? 4 * r.f : dir === 'down' ? 6 : -6), r.y - 11 - bob);
-  ctx.rotate(dir === 'side' ? (r.f > 0 ? -1.15 : Math.PI + 1.15) : dir === 'down' ? 1.9 : -2.2);
-  ctx.fillStyle = wp.color; ctx.fillRect(1, -1, 10 + r.w * 0.8, 2); ctx.fillStyle = '#7a5a2a'; ctx.fillRect(-1, -1.5, 3, 3); ctx.restore();
+  ctx.rotate(sw ? r.swingA - 1.2 + 2.4 * kk : idle);
+  const len = (10 + r.w * 0.8) * (sw ? 1.25 : 1);
+  if (sw) { ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = wp.glow; ctx.globalAlpha = 0.55; ctx.fillRect(1, -2.2, len, 4.4); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over'; }
+  ctx.fillStyle = wp.color; ctx.fillRect(1, -1, len, 2); ctx.fillStyle = '#7a5a2a'; ctx.fillRect(-1, -1.5, 3, 3); ctx.restore();
   drawTag(r.x, r.y - 24 - bob, r.n, r.l, false);
   if (r.bubbleT > 0 && r.bubble) drawBubble(r.x, r.y - 31 - bob, r.bubble, r.bubbleT);
 }
@@ -2848,11 +2890,12 @@ async function onUser(u: User | null) {
   if (!save.name) showCreate(); else { writeSave(save); void startPlaying(); }
 }
 function devFake() {
-  const mkr = (id: string, n: string, l: number, dx: number, dy: number, k: number[], text = ''): Remote => ({ uid: id, n, l, x: P.x + dx, y: P.y + dy, tx: P.x + dx, ty: P.y + dy, d: 1, f: 1, m: 0, k, a: 1, w: 2, anim: 0, bubble: text, bubbleT: text ? 999 : 0, ct: 0 });
+  const mkr = (id: string, n: string, l: number, dx: number, dy: number, k: number[], text = ''): Remote => ({ uid: id, n, l, x: P.x + dx, y: P.y + dy, tx: P.x + dx, ty: P.y + dy, d: 1, f: 1, m: 0, k, a: 1, w: 2, anim: 0, bubble: text, bubbleT: text ? 999 : 0, ct: 0, q: 0, swingT: 0, swingA: 0 });
   remotes.set('a', mkr('a', 'นักรบฟ้า', 12, -50, -10, [1, 2, 1, 3, 2, 3, 1], 'สวัสดีทุกคน! ไปฟาร์มกันไหม'));
   remotes.set('b', mkr('b', 'Mimi', 45, 46, 8, [3, 0, 2, 1, 4, 0, 2]));
   remotes.set('c', mkr('c', 'ปลาทอง', 3, 8, -46, [0, 4, 0, 5, 0, 1, 0], 'รับเควสที่ไหนครับ'));
   myBubble = { text: 'เกมนี้สนุกมาก!', t: 999 };
+  setInterval(() => { const a = remotes.get('a'), b = remotes.get('b'), c2 = remotes.get('c'); if (a) remoteAction(a, 0, 0.3); if (b) remoteAction(b, 2, 0); if (c2) remoteAction(c2, 1, -1.2); }, 650);
 }
 function devAtDock() { if (map.dock) { P.x = map.dock.x; P.y = map.dock.y - 36; } }
 function devAtFarm() { const fo = farmOutpost(); if (fo) { P.x = fo.x; P.y = fo.y + 24; } }

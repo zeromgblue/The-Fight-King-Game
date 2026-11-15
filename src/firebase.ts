@@ -48,7 +48,7 @@ export async function pushProfile(uid: string, p: Profile) {
 }
 
 /** Live presence + chat: rooms/{room}/{uid}. Everyone in a room sees each other; chat text rides on the presence record. */
-export interface Presence { n: string; l: number; x: number; y: number; d: number; f: number; m: number; k: number[]; a: number; w: number; c?: string; ct?: number; }
+export interface Presence { n: string; l: number; x: number; y: number; d: number; f: number; m: number; k: number[]; a: number; w: number; c?: string; ct?: number; q?: number; qk?: number; qa?: number; }
 export function joinRoom(room: string, uid: string, init: Presence, h: { add: (id: string, p: Presence) => void; change: (id: string, p: Presence) => void; remove: (id: string) => void }): () => void {
   if (!rtdb) return () => { /* offline */ };
   const me = ref(rtdb, `rooms/${room}/${uid}`), all = ref(rtdb, `rooms/${room}`);

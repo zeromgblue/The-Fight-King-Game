@@ -498,3 +498,55 @@ body.inapp #rotate-hint { display: none !important; }
   #chatlog { bottom: calc(126px + env(safe-area-inset-bottom)); width: min(240px, 34vw); } #chatlog .cl { font-size: 11px; padding: 1px 6px; }
   #chatbar { top: calc(52px + env(safe-area-inset-top)); padding: 4px; } #chat-in { padding: 5px 8px; font-size: 13px; } #chat-send { padding: 0 12px; font-size: 13px; }
 }
+
+/* floating joystick */
+#stick-zone { position: fixed; left: 0; bottom: 0; width: 44vw; height: 78vh; z-index: 4; touch-action: none; -webkit-touch-callout: none; }
+#stick-zone.hidden { display: none; }
+#stick { pointer-events: none !important; transition: opacity .15s; }
+#stick.idle { opacity: .5; }
+#knob { transition: none !important; }
+
+/* ===== phone landscape: big, well-spaced touch targets (scales with screen height) ===== */
+@media (orientation: landscape) and (max-height: 480px) {
+  :root { --u: clamp(.8px, .2564vh, 1.12px); --sr: env(safe-area-inset-right); --sb: env(safe-area-inset-bottom); }
+  #stick { width: calc(124 * var(--u)); height: calc(124 * var(--u)); left: calc(22 * var(--u) + env(safe-area-inset-left)); bottom: calc(26 * var(--u) + var(--sb)); }
+  #knob { width: calc(54 * var(--u)); height: calc(54 * var(--u)); left: calc(35 * var(--u)); top: calc(35 * var(--u)); }
+  /* action cluster: attack in the corner, the rest on an arc around it */
+  .pad { width: calc(52 * var(--u)); height: calc(52 * var(--u)); border-width: 3px; }
+  .pad.big { width: calc(88 * var(--u)); height: calc(88 * var(--u)); font-size: calc(20 * var(--u)); right: calc(16 * var(--u) + var(--sr)); bottom: calc(16 * var(--u) + var(--sb)); }
+  .pad.dash { width: calc(60 * var(--u)); height: calc(60 * var(--u)); font-size: calc(14 * var(--u)); right: calc(130 * var(--u) + var(--sr)); bottom: calc(14 * var(--u) + var(--sb)); }
+  .pad.sk { width: calc(50 * var(--u)); height: calc(50 * var(--u)); font-size: calc(19 * var(--u)); }
+  .pad.s1 { right: calc(125 * var(--u) + var(--sr)); bottom: calc(91 * var(--u) + var(--sb)); }
+  .pad.s2 { right: calc(71 * var(--u) + var(--sr)); bottom: calc(125 * var(--u) + var(--sb)); }
+  .pad.s3 { right: calc(13 * var(--u) + var(--sr)); bottom: calc(129 * var(--u) + var(--sb)); }
+  .pad.skill { width: calc(54 * var(--u)); height: calc(54 * var(--u)); font-size: calc(13 * var(--u)); right: calc(189 * var(--u) + var(--sr)); bottom: calc(85 * var(--u) + var(--sb)); }
+  .pad.talk { width: calc(62 * var(--u)); height: calc(62 * var(--u)); font-size: calc(14 * var(--u)); right: calc(195 * var(--u) + var(--sr)); bottom: calc(147 * var(--u) + var(--sb)); }
+  /* side buttons */
+  .round-btn { width: calc(46 * var(--u)); height: calc(46 * var(--u)); }
+  .round-btn svg { width: calc(24 * var(--u)); height: calc(24 * var(--u)); }
+  .round-btn.small { width: calc(40 * var(--u)); height: calc(40 * var(--u)); }
+  .round-btn.small svg { width: calc(21 * var(--u)); height: calc(21 * var(--u)); }
+  .round-btn::after, .slot::after { content: ''; position: absolute; inset: -6px; }
+  #btn-mute { right: calc(8 * var(--u) + var(--sr)); top: calc(6 * var(--u) + env(safe-area-inset-top)); }
+  #btn-home { right: calc(54 * var(--u) + var(--sr)); top: calc(6 * var(--u) + env(safe-area-inset-top)); }
+  #btn-chat { right: calc(100 * var(--u) + var(--sr)); top: calc(6 * var(--u) + env(safe-area-inset-top)); }
+  #btn-prep { right: calc(8 * var(--u) + var(--sr)); top: calc(56 * var(--u) + env(safe-area-inset-top)); }
+  #btn-dress { right: calc(8 * var(--u) + var(--sr)); top: calc(108 * var(--u) + env(safe-area-inset-top)); }
+  #btn-menu { right: calc(8 * var(--u) + var(--sr)); top: calc(160 * var(--u) + env(safe-area-inset-top)); }
+  #btn-gps { left: calc(64 * var(--u) + env(safe-area-inset-left)); }
+  /* item slots */
+  .slot { width: calc(38 * var(--u)); height: calc(38 * var(--u)); }
+  #hotbar { gap: calc(5 * var(--u)); }
+}
+
+#quest-pill { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (orientation: landscape) and (max-height: 480px) {
+  .top-center { left: 50%; right: auto; transform: translateX(-50%); top: calc(5px + env(safe-area-inset-top)); width: clamp(160px, calc(100vw - 470px), 340px); }
+}
+/* legacy narrow-screen rules must not break phone landscape */
+@media (orientation: landscape) and (max-height: 480px) {
+  .stage-name { display: block; }
+  .gold-pill { left: calc(8px + env(safe-area-inset-left)); right: auto; top: calc(6px + env(safe-area-inset-top)); }
+  #minimap { left: calc(8px + env(safe-area-inset-left)); top: calc(34px + env(safe-area-inset-top)); }
+  #btn-map, #btn-gps { top: calc(34px + 62px + 10px + env(safe-area-inset-top)); }
+}
